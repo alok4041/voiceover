@@ -1,0 +1,7 @@
+.gradle/
+**/build/
+local.properties
+token-server/node_modules/
+token-server/.env
+*.jks
+*.keystore
