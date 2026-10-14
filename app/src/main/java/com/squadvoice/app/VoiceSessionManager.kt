@@ -53,7 +53,7 @@ object VoiceSessionManager {
             val newRoom = LiveKit.create(context.applicationContext)
             room = newRoom
             eventsJob = scope.launch {
-                newRoom.events.collect { event ->
+                newRoom.events.events.collect { event ->
                     when (event) {
                         is RoomEvent.Reconnecting -> {
                             mutableState.update {
