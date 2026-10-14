@@ -76,6 +76,25 @@
       .download svg { width: 19px; height: 19px; }
       .file-info { color: #858a9b; font-size: 12px; }
 
+      .versions { margin: 54px auto 0; text-align: left; }
+      .versions-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+      .versions-heading h2 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
+      .versions-heading p { margin: 7px 0 0; color: #969bab; font-size: 13px; line-height: 1.5; }
+      .release-list { display: grid; gap: 11px; margin-top: 18px; }
+      .release-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 18px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 16px; background: rgba(255, 255, 255, .035); }
+      .release-info { min-width: 0; }
+      .release-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 750; }
+      .release-tag { color: #c6bcff; }
+      .release-badge { padding: 4px 7px; border: 1px solid rgba(126, 231, 191, .22); border-radius: 999px; background: rgba(126, 231, 191, .08); color: #91e8c8; font-size: 10px; font-weight: 700; }
+      .release-badge.preview { border-color: rgba(255, 206, 113, .22); background: rgba(255, 206, 113, .08); color: #ffd27d; }
+      .release-meta { margin: 6px 0 0; color: #969bab; font-size: 12px; line-height: 1.5; }
+      .release-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
+      .release-download { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid rgba(183, 168, 255, .32); border-radius: 11px; color: #d2c9ff; font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+      .release-download:hover { background: rgba(183, 168, 255, .1); }
+      .release-notes { color: #9c91d2; font-size: 11px; text-decoration: none; white-space: nowrap; }
+      .release-notes:hover, footer a:hover { text-decoration: underline; }
+      .release-status { margin: 11px 2px 0; color: #858a9b; font-size: 11px; line-height: 1.5; }
+
       .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin: 52px 0 0; text-align: left; }
       .feature { min-height: 124px; padding: 20px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 16px; background: rgba(255, 255, 255, .035); }
       .feature-icon { display: grid; width: 34px; height: 34px; place-items: center; margin-bottom: 15px; border-radius: 10px; background: rgba(177, 163, 255, .12); color: #c4b8ff; font-size: 17px; }
@@ -102,6 +121,10 @@
         .feature { min-height: auto; display: grid; grid-template-columns: 36px 1fr; column-gap: 12px; padding: 15px; }
         .feature-icon { grid-row: span 2; margin: 0; }
         .feature strong { align-self: end; }
+        .versions { margin-top: 40px; }
+        .versions-heading { align-items: start; flex-direction: column; gap: 5px; }
+        .release-card { align-items: flex-start; flex-direction: column; gap: 12px; padding: 15px; }
+        .release-actions { width: 100%; justify-content: space-between; }
         .install { margin-top: 38px; padding: 21px; }
         .steps { gap: 14px; }
       }
@@ -137,6 +160,28 @@
           </div>
         </section>
 
+        <section class="versions" aria-labelledby="versions-title">
+          <div class="versions-heading">
+            <div>
+              <h2 id="versions-title">APK versions</h2>
+              <p>Choose a version to install. The newest release is marked for you.</p>
+            </div>
+          </div>
+          <div class="release-list" id="release-list" aria-live="polite">
+            <article class="release-card">
+              <div class="release-info">
+                <h3 class="release-title"><span class="release-tag">v1.0.0</span><span class="release-badge">Latest</span></h3>
+                <p class="release-meta">Android APK · about 65 MB</p>
+              </div>
+              <div class="release-actions">
+                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.0.0/app-debug.apk">Download APK</a>
+                <a class="release-notes" href="https://github.com/alok4041/voiceover/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Release details</a>
+              </div>
+            </article>
+          </div>
+          <p class="release-status" id="release-status" role="status">Showing published versions with an Android APK.</p>
+        </section>
+
         <section class="features" aria-label="App features">
           <article class="feature">
             <span class="feature-icon" aria-hidden="true">◉</span>
@@ -169,5 +214,85 @@
 
       <footer>SquadVoice · <a href="https://github.com/alok4041/voiceover">Project on GitHub</a></footer>
     </div>
+    <script>
+      (() => {
+        const releaseList = document.getElementById('release-list');
+        const releaseStatus = document.getElementById('release-status');
+        const releasesUrl = 'https://api.github.com/repos/alok4041/voiceover/releases?per_page=100';
+
+        function formatSize(bytes) {
+          if (!Number.isFinite(bytes) || bytes <= 0) return 'APK';
+          return `${(bytes / (1024 * 1024)).toFixed(1)} MB APK`;
+        }
+
+        function makeReleaseCard(release, latestStableIndex, apk) {
+          const card = document.createElement('article');
+          card.className = 'release-card';
+
+          const info = document.createElement('div');
+          info.className = 'release-info';
+          const title = document.createElement('h3');
+          title.className = 'release-title';
+          const tag = document.createElement('span');
+          tag.className = 'release-tag';
+          tag.textContent = release.tag_name || 'Untitled version';
+          title.append(tag);
+
+          const badge = document.createElement('span');
+          badge.className = `release-badge${release.prerelease ? ' preview' : ''}`;
+          badge.textContent = release.prerelease ? 'Pre-release' : (index === latestStableIndex ? 'Latest' : 'Stable');
+          title.append(badge);
+
+          const meta = document.createElement('p');
+          meta.className = 'release-meta';
+          const published = release.published_at
+            ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(release.published_at))
+            : 'Date unavailable';
+          const releaseName = release.name && release.name !== release.tag_name ? ` · ${release.name}` : '';
+          meta.textContent = `${formatSize(apk.size)} · Published ${published}${releaseName}`;
+          info.append(title, meta);
+
+          const actions = document.createElement('div');
+          actions.className = 'release-actions';
+          const download = document.createElement('a');
+          download.className = 'release-download';
+          download.href = apk.browser_download_url;
+          download.textContent = 'Download APK';
+          const details = document.createElement('a');
+          details.className = 'release-notes';
+          details.href = release.html_url;
+          details.target = '_blank';
+          details.rel = 'noopener noreferrer';
+          details.textContent = 'Release details';
+          actions.append(download, details);
+          card.append(info, actions);
+          return card;
+        }
+
+        fetch(releasesUrl, { headers: { Accept: 'application/vnd.github+json' } })
+          .then((response) => {
+            if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+            return response.json();
+          })
+          .then((releases) => {
+            const publishedApks = releases
+              .filter((release) => !release.draft)
+              .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name.toLowerCase().endsWith('.apk')) }))
+              .filter(({ apk }) => apk);
+
+            if (publishedApks.length === 0) {
+              releaseStatus.textContent = 'No APK releases are published yet. Check GitHub Releases for updates.';
+              return;
+            }
+
+            const latestStableIndex = publishedApks.findIndex(({ release }) => !release.prerelease);
+            releaseList.replaceChildren(...publishedApks.map(({ release, apk }) => makeReleaseCard(release, latestStableIndex, apk)));
+            releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
+          })
+          .catch(() => {
+            releaseStatus.textContent = 'Showing the saved version list. Open GitHub Releases to check for newer builds.';
+          });
+      })();
+    </script>
   </body>
 </html>
