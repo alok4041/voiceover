@@ -52,9 +52,9 @@ Install the debug app on two Android devices or emulators. Create a room on one,
 
 ## Audio and game compatibility
 
-SquadVoice starts its microphone foreground service while the app is visible so the room can stay active when a game is in front. Android may still change audio routing when a call starts, especially with Bluetooth headsets. Wired or USB headphones usually preserve game audio best.
+SquadVoice starts its microphone foreground service while the app is visible so the room can stay active when a game is in front. It does not request audio focus, which helps the game keep playing its footsteps and effects, and it sends only the microphone to the room. Android and the game still control audio routing and can behave differently across phones; wired or USB headphones usually preserve game audio best.
 
-Some games take exclusive microphone access. Android may then give SquadVoice silence, or the game may lose its mic. In those games, turn off the game's built-in voice chat and use SquadVoice instead. This must be checked on each target game and phone.
+Android cannot guarantee that the game and SquadVoice both receive the phone microphone at once. Turn off the game's built-in voice chat/mic and use SquadVoice for talking; leave the game's sound effects enabled. This must be checked on each target game and phone.
 
 ## Project layout
 

@@ -1,7 +1,13 @@
 package com.squadvoice.app
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioManager
+import io.livekit.android.AudioOptions
+import io.livekit.android.AudioType
 import io.livekit.android.LiveKit
+import io.livekit.android.LiveKitOverrides
+import io.livekit.android.audio.NoAudioHandler
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
@@ -27,7 +33,6 @@ data class VoiceSessionState(
     val isConnecting: Boolean = false,
     val isConnected: Boolean = false,
     val micEnabled: Boolean = false,
-    val speakerOutput: Boolean = false,
     val participants: List<ParticipantUi> = emptyList(),
     val errorMessage: String? = null,
 )
@@ -50,7 +55,25 @@ object VoiceSessionManager {
             mutableState.value = VoiceSessionState(isConnecting = true)
             localName = participantName
 
-            val newRoom = LiveKit.create(context.applicationContext)
+            // Play received SquadVoice speech through the same media volume as the game.
+            // Do not request call audio focus or force call routing while game audio is active.
+            val gameMixAudio = AudioType.CustomAudioType(
+                audioMode = AudioManager.MODE_NORMAL,
+                audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+                audioStreamType = AudioManager.STREAM_MUSIC,
+            )
+            val newRoom = LiveKit.create(
+                appContext = context.applicationContext,
+                overrides = LiveKitOverrides(
+                    audioOptions = AudioOptions(
+                        audioOutputType = gameMixAudio,
+                        audioHandler = NoAudioHandler(),
+                    ),
+                ),
+            )
             room = newRoom
             eventsJob = scope.launch {
                 newRoom.events.events.collect { event ->
@@ -151,30 +174,6 @@ object VoiceSessionManager {
                     }
                 }
         }
-    }
-
-    /** Force speaker output, or return audio routing to the SDK's automatic headset-first choice. */
-    fun setSpeakerOutput(enabled: Boolean) {
-        val audioSwitch = room?.audioSwitchHandler
-        if (audioSwitch == null) {
-            mutableState.update { it.copy(errorMessage = "Audio routing is not ready yet.") }
-            return
-        }
-
-        if (enabled) {
-            val speaker = audioSwitch.availableAudioDevices.firstOrNull {
-                it.javaClass.simpleName.contains("Speaker", ignoreCase = true)
-            }
-            if (speaker == null) {
-                mutableState.update { it.copy(errorMessage = "Speaker output is not available right now.") }
-                return
-            }
-            audioSwitch.selectDevice(speaker)
-        } else {
-            audioSwitch.selectDevice(null)
-        }
-
-        mutableState.update { it.copy(speakerOutput = enabled, errorMessage = null) }
     }
 
     fun endSession() {

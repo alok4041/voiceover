@@ -247,7 +247,6 @@ private fun SquadVoiceApp() {
                 onTogglePushToTalk = { enabled ->
                     pushToTalk = enabled
                 },
-                onToggleSpeaker = { VoiceSessionManager.setSpeakerOutput(!session.speakerOutput) },
                 onCopyCode = { copyRoomCode(context, activeRoom!!.code) },
                 onShareCode = { shareRoomCode(context, activeRoom!!.code) },
                 onToggleOverlay = {
@@ -440,7 +439,6 @@ private fun RoomScreen(
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
     onTogglePushToTalk: (Boolean) -> Unit,
-    onToggleSpeaker: () -> Unit,
     onCopyCode: () -> Unit,
     onShareCode: () -> Unit,
     onToggleOverlay: () -> Unit,
@@ -545,12 +543,19 @@ private fun RoomScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = onToggleSpeaker,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = RaisedPanel, contentColor = Color.White),
+            Surface(
+                modifier = Modifier.weight(1f).height(56.dp),
+                color = RaisedPanel,
                 shape = RoundedCornerShape(15.dp),
-            ) { Text(if (session.speakerOutput) "Speaker on" else "Audio: auto") }
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("Game + chat volume", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Use the media volume", fontSize = 10.sp, color = MutedText)
+                }
+            }
             Button(
                 onClick = onToggleOverlay,
                 modifier = Modifier.weight(1f),
@@ -562,7 +567,7 @@ private fun RoomScreen(
         if (errorMessage != null) ErrorNotice(errorMessage)
 
         Text(
-            "SquadVoice uses your microphone only. The game mix is not captured. Wired or USB headphones usually keep game audio clearest.",
+            "Only your voice goes to the room; footsteps and game sounds stay on your phone. Turn off the game's built-in voice chat, but keep its sound effects on. Wired or USB headphones usually keep game audio clearest.",
             color = MutedText,
             fontSize = 11.sp,
             lineHeight = 16.sp,
