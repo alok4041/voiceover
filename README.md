@@ -9,8 +9,9 @@ SquadVoice is a small Android voice-room app for gaming squads. It uses Kotlin a
 - Mute or unmute, or enable hold-to-talk.
 - Keep a room connected with an Android microphone foreground service and notification controls.
 - Optionally show a floating mute control over a game.
-- Choose speaker output or let Android and LiveKit automatically prefer connected headphones.
+- Use Android's audio routing and shared game/chat media volume.
 - Share a room code through the Android share sheet.
+- Switch between day and night themes.
 
 The app publishes microphone audio only. It does not capture the game's audio mix. LiveKit uses WebRTC's voice processing and Opus audio pipeline. Headphone routing and audio focus behavior still vary by phone and game.
 
@@ -52,7 +53,7 @@ Install the debug app on two Android devices or emulators. Create a room on one,
 
 ## Audio and game compatibility
 
-SquadVoice starts its microphone foreground service while the app is visible so the room can stay active when a game is in front. It does not request audio focus, which helps the game keep playing its footsteps and effects, and it sends only the microphone to the room. Android and the game still control audio routing and can behave differently across phones; wired or USB headphones usually preserve game audio best.
+SquadVoice starts its microphone foreground service while the app is visible so the room can stay active when a game is in front. It plays squad voices through Android's media stream and does not request call audio focus. This lets squad voices share the game/media volume stream while reducing the chance that the game fades its footsteps or effects. It sends only the microphone to the room; game sounds remain local. Android and the game still control audio routing and may show their own volume UI on some phones. Wired or USB headphones usually preserve game audio best.
 
 Android cannot guarantee that the game and SquadVoice both receive the phone microphone at once. Turn off the game's built-in voice chat/mic and use SquadVoice for talking; leave the game's sound effects enabled. This must be checked on each target game and phone.
 

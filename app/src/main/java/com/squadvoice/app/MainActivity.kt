@@ -46,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,39 +78,75 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { SquadVoiceTheme { SquadVoiceApp() } }
+        setContent {
+            val preferences = remember { getSharedPreferences("squadvoice", MODE_PRIVATE) }
+            var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
+            SquadVoiceTheme(darkMode) {
+                SquadVoiceApp(
+                    darkMode = darkMode,
+                    onToggleTheme = {
+                        darkMode = !darkMode
+                        preferences.edit().putBoolean("dark_mode", darkMode).apply()
+                    },
+                )
+            }
+        }
     }
 }
 
-private val Ink = Color(0xFF0A1012)
-private val Panel = Color(0xFF111A1D)
-private val RaisedPanel = Color(0xFF182326)
-private val Mint = Color(0xFF8BE8D5)
-private val MutedText = Color(0xFF9AAEAF)
-private val Alert = Color(0xFFFFB4AB)
+private val Ink: Color
+    @Composable get() = MaterialTheme.colorScheme.background
+private val Panel: Color
+    @Composable get() = MaterialTheme.colorScheme.surface
+private val RaisedPanel: Color
+    @Composable get() = MaterialTheme.colorScheme.surfaceVariant
+private val Mint: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val MutedText: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val Alert: Color
+    @Composable get() = MaterialTheme.colorScheme.error
 
 @Composable
-private fun SquadVoiceTheme(content: @Composable () -> Unit) {
+private fun SquadVoiceTheme(darkMode: Boolean, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Mint,
-            onPrimary = Color(0xFF003832),
-            primaryContainer = Color(0xFF005048),
-            onPrimaryContainer = Color(0xFFB7F3E7),
-            background = Ink,
-            onBackground = Color(0xFFE4ECEC),
-            surface = Panel,
-            onSurface = Color(0xFFE4ECEC),
-            surfaceVariant = RaisedPanel,
-            onSurfaceVariant = MutedText,
-            error = Alert,
-        ),
+        colorScheme = if (darkMode) {
+            darkColorScheme(
+                primary = Color(0xFF8BE8D5),
+                onPrimary = Color(0xFF003832),
+                primaryContainer = Color(0xFF005048),
+                onPrimaryContainer = Color(0xFFB7F3E7),
+                background = Color(0xFF0A1012),
+                onBackground = Color(0xFFE4ECEC),
+                surface = Color(0xFF111A1D),
+                onSurface = Color(0xFFE4ECEC),
+                surfaceVariant = Color(0xFF182326),
+                onSurfaceVariant = Color(0xFF9AAEAF),
+                error = Color(0xFFFFB4AB),
+                errorContainer = Color(0xFF5C1715),
+            )
+        } else {
+            lightColorScheme(
+                primary = Color(0xFF006B5F),
+                onPrimary = Color.White,
+                primaryContainer = Color(0xFFB7F3E7),
+                onPrimaryContainer = Color(0xFF00201B),
+                background = Color(0xFFF4FAF9),
+                onBackground = Color(0xFF161D1B),
+                surface = Color.White,
+                onSurface = Color(0xFF161D1B),
+                surfaceVariant = Color(0xFFE1EEEA),
+                onSurfaceVariant = Color(0xFF40524D),
+                error = Color(0xFFBA1A1A),
+                errorContainer = Color(0xFFFFDAD6),
+            )
+        },
         content = content,
     )
 }
 
 @Composable
-private fun SquadVoiceApp() {
+private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
     val preferences = remember { context.getSharedPreferences("squadvoice", Context.MODE_PRIVATE) }
@@ -242,6 +279,8 @@ private fun SquadVoiceApp() {
                 errorMessage = errorMessage ?: session.errorMessage,
                 pushToTalk = pushToTalk,
                 overlayEnabled = overlayEnabled,
+                darkMode = darkMode,
+                onToggleTheme = onToggleTheme,
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onTogglePushToTalk = { enabled ->
@@ -285,6 +324,8 @@ private fun SquadVoiceApp() {
                 joinCode = joinCode,
                 isLoading = isLoading,
                 errorMessage = errorMessage,
+                darkMode = darkMode,
+                onToggleTheme = onToggleTheme,
                 onPlayerNameChange = {
                     playerName = it
                     preferences.edit().putString("player_name", it).apply()
@@ -321,6 +362,8 @@ private fun HomeScreen(
     joinCode: String,
     isLoading: Boolean,
     errorMessage: String?,
+    darkMode: Boolean,
+    onToggleTheme: () -> Unit,
     onPlayerNameChange: (String) -> Unit,
     onRoomNameChange: (String) -> Unit,
     onJoinCodeChange: (String) -> Unit,
@@ -350,7 +393,7 @@ private fun HomeScreen(
                 Text("VOICE FOR YOUR SQUAD", fontSize = 9.sp, color = MutedText, letterSpacing = 1.4.sp)
             }
             Spacer(Modifier.weight(1f))
-            Text("NO VIDEO", fontSize = 10.sp, color = Mint, letterSpacing = 1.sp)
+            TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
         }
 
         Spacer(Modifier.height(3.dp))
@@ -436,6 +479,8 @@ private fun RoomScreen(
     errorMessage: String?,
     pushToTalk: Boolean,
     overlayEnabled: Boolean,
+    darkMode: Boolean,
+    onToggleTheme: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
     onTogglePushToTalk: (Boolean) -> Unit,
@@ -457,9 +502,13 @@ private fun RoomScreen(
                 Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
+            TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
             Button(
                 onClick = onLeave,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34201E), contentColor = Alert),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = Alert,
+                ),
                 shape = RoundedCornerShape(14.dp),
             ) { Text("Leave") }
         }
@@ -559,7 +608,10 @@ private fun RoomScreen(
             Button(
                 onClick = onToggleOverlay,
                 modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = RaisedPanel, contentColor = Color.White),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = RaisedPanel,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
                 shape = RoundedCornerShape(15.dp),
             ) { Text(if (overlayEnabled) "Overlay on" else "Game overlay") }
         }
@@ -585,7 +637,7 @@ private fun MicControl(
     onSetMicrophone: (Boolean) -> Unit,
 ) {
     val color = if (micEnabled) Mint else RaisedPanel
-    val textColor = if (micEnabled) Ink else Color.White
+    val textColor = if (micEnabled) Ink else MaterialTheme.colorScheme.onSurface
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -738,7 +790,7 @@ private fun ErrorNotice(message: String) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(15.dp))
-            .background(Color(0xFF34201E))
+            .background(MaterialTheme.colorScheme.errorContainer)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
