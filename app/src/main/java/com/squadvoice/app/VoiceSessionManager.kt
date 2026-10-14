@@ -55,6 +55,45 @@ object VoiceSessionManager {
             eventsJob = scope.launch {
                 newRoom.events.collect { event ->
                     when (event) {
+                        is RoomEvent.Reconnecting -> {
+                            mutableState.update {
+                                it.copy(isConnecting = true, isConnected = false, errorMessage = "Reconnecting to the room…")
+                            }
+                        }
+
+                        is RoomEvent.Reconnected -> {
+                            mutableState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    isConnected = true,
+                                    micEnabled = newRoom.localParticipant.isMicrophoneEnabled,
+                                    errorMessage = null,
+                                )
+                            }
+                        }
+
+                        is RoomEvent.Disconnected -> {
+                            mutableState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    isConnected = false,
+                                    micEnabled = false,
+                                    errorMessage = event.error?.message ?: "Disconnected from the voice room.",
+                                )
+                            }
+                        }
+
+                        is RoomEvent.FailedToConnect -> {
+                            mutableState.update {
+                                it.copy(
+                                    isConnecting = false,
+                                    isConnected = false,
+                                    micEnabled = false,
+                                    errorMessage = event.error.message ?: "Couldn't connect to the voice room.",
+                                )
+                            }
+                        }
+
                         is RoomEvent.ActiveSpeakersChanged -> {
                             activeSpeakerIds = event.speakers.mapNotNull { it.identity?.value }.toSet()
                             publishParticipants(newRoom)

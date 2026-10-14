@@ -15,8 +15,11 @@ const roomCodeLifetimeMs = 12 * 60 * 60 * 1000;
 const maximumParticipants = 10;
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const rooms = new Map();
+const livekitApiHost = process.env.LIVEKIT_URL
+  .replace(/^wss:/i, 'https:')
+  .replace(/^ws:/i, 'http:');
 const livekit = new LiveKitAPI({
-  host: process.env.LIVEKIT_URL,
+  host: livekitApiHost,
   apiKey: process.env.LIVEKIT_API_KEY,
   secret: process.env.LIVEKIT_API_SECRET,
 });

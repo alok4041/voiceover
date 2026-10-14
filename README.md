@@ -32,7 +32,7 @@ npm install
 npm start
 ```
 
-The API server listens on port 3000. Its room codes are held in memory for up to 12 hours, so restarting the token server clears them. LiveKit rooms have a 5-minute empty timeout and a 10-player cap.
+The API server listens on port 3000. Its room codes are held in memory for up to 12 hours, so restarting the token server clears them. LiveKit rooms have a 5-minute empty timeout and a 10-player cap. Use LiveKit's `wss://` URL in `.env`; the token server converts it to `https://` for room-management API calls.
 
 ## 2. Run the Android app
 

@@ -122,18 +122,18 @@ class VoiceRoomService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_mic_notification)
             .setContentTitle("SquadVoice · $roomCode")
             .setContentText(status)
             .setContentIntent(openApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .addAction(
-                android.R.drawable.ic_lock_silent_mode,
+                R.drawable.ic_mic_notification,
                 if (state.micEnabled) "Mute" else "Unmute",
                 toggleMic,
             )
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Leave", leaveRoom)
+            .addAction(R.drawable.ic_close_notification, "Leave", leaveRoom)
             .build()
     }
 

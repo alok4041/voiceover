@@ -41,7 +41,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -217,7 +216,16 @@ private fun SquadVoiceApp() {
     LaunchedEffect(activeRoom, isInRoom) {
         val credentials = activeRoom
         if (isInRoom && credentials != null && !session.isConnected && !session.isConnecting && session.errorMessage == null) {
-            VoiceRoomService.start(context, credentials, playerName.trim())
+            runCatching { VoiceRoomService.start(context, credentials, playerName.trim()) }
+                .onFailure { error ->
+                    errorMessage = error.message ?: "Android couldn't start the microphone service."
+                }
+        }
+    }
+
+    LaunchedEffect(session.isConnected, pushToTalk) {
+        if (session.isConnected && pushToTalk && session.micEnabled) {
+            VoiceSessionManager.setMicrophoneEnabled(false)
         }
     }
 
@@ -236,7 +244,6 @@ private fun SquadVoiceApp() {
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onTogglePushToTalk = { enabled ->
                     pushToTalk = enabled
-                    if (enabled) VoiceSessionManager.setMicrophoneEnabled(false)
                 },
                 onToggleSpeaker = { VoiceSessionManager.setSpeakerOutput(!session.speakerOutput) },
                 onCopyCode = { copyRoomCode(context, activeRoom!!.code) },
@@ -515,6 +522,7 @@ private fun RoomScreen(
             micEnabled = session.micEnabled,
             pushToTalk = pushToTalk,
             enabled = session.isConnected,
+            isConnecting = session.isConnecting,
             onToggle = onToggleMicrophone,
             onSetMicrophone = onSetMicrophone,
         )
@@ -565,6 +573,7 @@ private fun MicControl(
     micEnabled: Boolean,
     pushToTalk: Boolean,
     enabled: Boolean,
+    isConnecting: Boolean,
     onToggle: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
 ) {
@@ -579,6 +588,16 @@ private fun MicControl(
             .semantics {
                 role = Role.Button
                 contentDescription = if (micEnabled) "Microphone on" else "Microphone muted"
+                if (!pushToTalk) {
+                    onClick(label = "Toggle microphone") {
+                        if (enabled) {
+                            onToggle()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
             }
             .pointerInput(pushToTalk, enabled, micEnabled) {
                 if (pushToTalk) {
@@ -598,7 +617,8 @@ private fun MicControl(
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 when {
-                    !enabled -> "CONNECTING"
+                    !enabled && isConnecting -> "CONNECTING"
+                    !enabled -> "VOICE OFF"
                     pushToTalk -> "HOLD TO TALK"
                     micEnabled -> "MIC IS LIVE"
                     else -> "TAP TO UNMUTE"
@@ -609,7 +629,13 @@ private fun MicControl(
                 letterSpacing = 1.sp,
             )
             Text(
-                if (pushToTalk) "Release to mute" else if (micEnabled) "Tap to mute your voice" else "Your squad can't hear you yet",
+                when {
+                    !enabled && isConnecting -> "Joining your squad"
+                    !enabled -> "Leave and rejoin to try again"
+                    pushToTalk -> "Release to mute"
+                    micEnabled -> "Tap to mute your voice"
+                    else -> "Your squad can't hear you yet"
+                },
                 color = if (micEnabled) Ink.copy(alpha = 0.72f) else MutedText,
                 fontSize = 12.sp,
             )
