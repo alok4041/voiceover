@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 
 const requiredEnvironment = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'];
 const missingEnvironment = requiredEnvironment.filter((key) => !process.env[key]);
@@ -34,6 +35,7 @@ roomCodeCleanup.unref();
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
+app.use(express.static(fileURLToPath(new URL('./public/', import.meta.url))));
 
 app.get('/health', (_request, response) => response.json({ ok: true }));
 
