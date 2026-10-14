@@ -15,6 +15,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class VoiceRoomService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var roomCode: String = ""
+    private var notificationJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -48,17 +50,23 @@ class VoiceRoomService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        val session = VoiceSessionManager.state.value
+        if (roomCode == credentials.code && (session.isConnecting || session.isConnected)) {
+            return START_NOT_STICKY
+        }
 
         roomCode = credentials.code
         startAsForeground()
         VoiceSessionManager.connect(applicationContext, credentials, participantName)
-        serviceScope.launch {
+        notificationJob?.cancel()
+        notificationJob = serviceScope.launch {
             VoiceSessionManager.state.collect { refreshNotification(it) }
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        notificationJob?.cancel()
         serviceScope.cancel()
         VoiceSessionManager.endSession()
         OverlayControlsService.stop(this)
@@ -139,13 +147,13 @@ class VoiceRoomService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun Intent.toCredentials() = runCatching {
+    private fun Intent.toCredentials(): RoomCredentials? {
         val code = getStringExtra(EXTRA_CODE) ?: return null
         val roomName = getStringExtra(EXTRA_ROOM_NAME) ?: return null
         val serverUrl = getStringExtra(EXTRA_SERVER_URL) ?: return null
         val participantToken = getStringExtra(EXTRA_TOKEN) ?: return null
-        RoomCredentials(code, roomName, serverUrl, participantToken)
-    }.getOrNull()
+        return RoomCredentials(code, roomName, serverUrl, participantToken)
+    }
 
     companion object {
         private const val CHANNEL_ID = "squadvoice-room"

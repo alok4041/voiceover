@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -22,12 +23,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +48,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -114,7 +119,17 @@ private fun SquadVoiceApp() {
     var playerName by rememberSaveable { mutableStateOf(preferences.getString("player_name", "") ?: "") }
     var roomName by rememberSaveable { mutableStateOf("") }
     var joinCode by rememberSaveable { mutableStateOf("") }
-    var activeRoom by remember { mutableStateOf<RoomCredentials?>(null) }
+    var savedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedRoomName by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedServerUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedParticipantToken by rememberSaveable { mutableStateOf<String?>(null) }
+    val activeRoom = if (
+        savedRoomCode != null && savedRoomName != null && savedServerUrl != null && savedParticipantToken != null
+    ) {
+        RoomCredentials(savedRoomCode!!, savedRoomName!!, savedServerUrl!!, savedParticipantToken!!)
+    } else {
+        null
+    }
     var isInRoom by rememberSaveable { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -122,12 +137,30 @@ private fun SquadVoiceApp() {
     var overlayEnabled by rememberSaveable { mutableStateOf(false) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        val action = pendingRoomAction
+        pendingRoomAction = null
+        action?.invoke()
+    }
     val microphonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        val action = pendingRoomAction
-        pendingRoomAction = null
-        if (granted) action?.invoke() else errorMessage = "Allow microphone access to join voice chat."
+        if (!granted) {
+            pendingRoomAction = null
+            errorMessage = "Allow microphone access to join voice chat."
+        } else {
+            val action = pendingRoomAction
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                pendingRoomAction = null
+                action?.invoke()
+            }
+        }
     }
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -143,7 +176,14 @@ private fun SquadVoiceApp() {
 
     fun withMicrophonePermission(action: () -> Unit) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            action()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingRoomAction = action
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                action()
+            }
         } else {
             pendingRoomAction = action
             microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -161,9 +201,11 @@ private fun SquadVoiceApp() {
         coroutineScope.launch {
             try {
                 val credentials = action()
-                activeRoom = credentials
+                savedRoomCode = credentials.code
+                savedRoomName = credentials.roomName
+                savedServerUrl = credentials.serverUrl
+                savedParticipantToken = credentials.participantToken
                 isInRoom = true
-                VoiceRoomService.start(context, credentials, cleanName)
             } catch (error: Throwable) {
                 errorMessage = error.message ?: "Couldn't reach the room server."
             } finally {
@@ -172,7 +214,17 @@ private fun SquadVoiceApp() {
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
+    LaunchedEffect(activeRoom, isInRoom) {
+        val credentials = activeRoom
+        if (isInRoom && credentials != null && !session.isConnected && !session.isConnecting && session.errorMessage == null) {
+            VoiceRoomService.start(context, credentials, playerName.trim())
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+        color = Ink,
+    ) {
         if (isInRoom && activeRoom != null) {
             RoomScreen(
                 room = activeRoom!!,
@@ -180,8 +232,8 @@ private fun SquadVoiceApp() {
                 errorMessage = errorMessage ?: session.errorMessage,
                 pushToTalk = pushToTalk,
                 overlayEnabled = overlayEnabled,
-                onToggleMicrophone = VoiceSessionManager::toggleMicrophone,
-                onSetMicrophone = VoiceSessionManager::setMicrophoneEnabled,
+                onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
+                onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onTogglePushToTalk = { enabled ->
                     pushToTalk = enabled
                     if (enabled) VoiceSessionManager.setMicrophoneEnabled(false)
@@ -208,7 +260,10 @@ private fun SquadVoiceApp() {
                 onLeave = {
                     OverlayControlsService.stop(context)
                     activity.stopService(Intent(context, VoiceRoomService::class.java))
-                    activeRoom = null
+                    savedRoomCode = null
+                    savedRoomName = null
+                    savedServerUrl = null
+                    savedParticipantToken = null
                     isInRoom = false
                     overlayEnabled = false
                     pushToTalk = false
@@ -638,8 +693,8 @@ private fun TextButtonLabel(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(RaisedPanel)
-            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp)
+            .clickable(onClick = onClick)
             .semantics { contentDescription = label },
     )
 }

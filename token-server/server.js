@@ -21,6 +21,14 @@ const livekit = new LiveKitAPI({
   secret: process.env.LIVEKIT_API_SECRET,
 });
 
+const roomCodeCleanup = setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (now - room.createdAt > roomCodeLifetimeMs) rooms.delete(code);
+  }
+}, 10 * 60 * 1000);
+roomCodeCleanup.unref();
+
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
 
@@ -34,7 +42,7 @@ app.post('/rooms/create', async (request, response) => {
   }
 
   try {
-    const code = await createRoomCode();
+    const code = createRoomCode();
     await livekit.room.createRoom({
       name: code,
       emptyTimeout: 300,
@@ -96,7 +104,7 @@ app.listen(port, '0.0.0.0', () => {
   console.log(`SquadVoice token server listening on port ${port}`);
 });
 
-async function createRoomCode() {
+function createRoomCode() {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     let code = '';
     for (let index = 0; index < 6; index += 1) {

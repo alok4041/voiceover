@@ -56,7 +56,7 @@ object VoiceSessionManager {
                 newRoom.events.collect { event ->
                     when (event) {
                         is RoomEvent.ActiveSpeakersChanged -> {
-                            activeSpeakerIds = event.speakers.map { it.identity.value }.toSet()
+                            activeSpeakerIds = event.speakers.mapNotNull { it.identity?.value }.toSet()
                             publishParticipants(newRoom)
                         }
 
@@ -71,8 +71,11 @@ object VoiceSessionManager {
 
             try {
                 newRoom.connect(credentials.serverUrl, credentials.participantToken)
-                localIdentity = newRoom.localParticipant.identity.value
-                newRoom.localParticipant.setMicrophoneEnabled(true)
+                localIdentity = newRoom.localParticipant.identity?.value.orEmpty()
+                val microphoneStarted = newRoom.localParticipant.setMicrophoneEnabled(true)
+                if (!microphoneStarted) {
+                    throw IllegalStateException("Microphone could not start. Check app microphone access and try again.")
+                }
                 mutableState.update {
                     it.copy(isConnecting = false, isConnected = true, micEnabled = true, errorMessage = null)
                 }
@@ -96,8 +99,12 @@ object VoiceSessionManager {
         scope.launch {
             val currentRoom = room ?: return@launch
             runCatching { currentRoom.localParticipant.setMicrophoneEnabled(enabled) }
-                .onSuccess {
-                    mutableState.update { it.copy(micEnabled = enabled, errorMessage = null) }
+                .onSuccess { changed ->
+                    if (changed) {
+                        mutableState.update { it.copy(micEnabled = enabled, errorMessage = null) }
+                    } else {
+                        mutableState.update { it.copy(errorMessage = "Microphone state did not change. Check microphone access.") }
+                    }
                 }
                 .onFailure { error ->
                     mutableState.update {
@@ -148,27 +155,32 @@ object VoiceSessionManager {
 
     private fun publishParticipants(currentRoom: Room) {
         val local = currentRoom.localParticipant
-        localIdentity = local.identity.value
+        localIdentity = local.identity?.value.orEmpty()
         val currentParticipants = buildList {
-            add(
-                ParticipantUi(
-                    identity = localIdentity,
-                    name = localName,
-                    isLocal = true,
-                    isSpeaking = localIdentity in activeSpeakerIds,
-                ),
-            )
+            if (localIdentity.isNotEmpty()) {
+                add(
+                    ParticipantUi(
+                        identity = localIdentity,
+                        name = localName,
+                        isLocal = true,
+                        isSpeaking = localIdentity in activeSpeakerIds,
+                    ),
+                )
+            }
             currentRoom.remoteParticipants.values.forEach { participant ->
-                add(participant.toUi(activeSpeakerIds))
+                participant.toUi(activeSpeakerIds)?.let(::add)
             }
         }
         mutableState.update { it.copy(participants = currentParticipants) }
     }
 
-    private fun Participant.toUi(speakers: Set<String>) = ParticipantUi(
-        identity = identity.value,
-        name = name?.takeIf(String::isNotBlank) ?: identity.value,
-        isLocal = false,
-        isSpeaking = identity.value in speakers,
-    )
+    private fun Participant.toUi(speakers: Set<String>): ParticipantUi? {
+        val participantIdentity = identity?.value ?: return null
+        return ParticipantUi(
+            identity = participantIdentity,
+            name = name?.takeIf(String::isNotBlank) ?: participantIdentity,
+            isLocal = false,
+            isSpeaking = participantIdentity in speakers,
+        )
+    }
 }
