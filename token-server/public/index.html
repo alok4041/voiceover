@@ -225,7 +225,7 @@
           return `${(bytes / (1024 * 1024)).toFixed(1)} MB APK`;
         }
 
-        function makeReleaseCard(release, latestStableIndex, apk) {
+        function makeReleaseCard(release, latestStableIndex, apk, index) {
           const card = document.createElement('article');
           card.className = 'release-card';
 
@@ -286,7 +286,7 @@
             }
 
             const latestStableIndex = publishedApks.findIndex(({ release }) => !release.prerelease);
-            releaseList.replaceChildren(...publishedApks.map(({ release, apk }) => makeReleaseCard(release, latestStableIndex, apk)));
+            releaseList.replaceChildren(...publishedApks.map(({ release, apk }, index) => makeReleaseCard(release, latestStableIndex, apk, index)));
             releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
           })
           .catch(() => {
