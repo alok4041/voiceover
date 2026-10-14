@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b12" />
+    <meta
+      name="description"
+      content="SquadVoice keeps your gaming squad connected with simple, clear Android voice rooms."
+    />
+    <title>SquadVoice — Stay in the game together</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #090b12;
+        color: #f4f5fa;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background:
+          radial-gradient(ellipse at 50% -12%, rgba(114, 86, 255, .26), transparent 50%),
+          radial-gradient(ellipse at 100% 45%, rgba(45, 197, 155, .08), transparent 35%),
+          #090b12;
+      }
+
+      a { color: inherit; }
+
+      .shell { width: min(100% - 40px, 980px); margin: 0 auto; }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 82px;
+        border-bottom: 1px solid rgba(255, 255, 255, .09);
+      }
+
+      .brand { display: inline-flex; align-items: center; gap: 11px; font-size: 15px; font-weight: 800; letter-spacing: .12em; }
+      .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(178, 164, 255, .38); border-radius: 11px; background: rgba(137, 112, 255, .14); color: #c2b5ff; }
+      .brand-mark svg { width: 19px; height: 19px; }
+      .header-note { color: #9da2b3; font-size: 13px; }
+
+      main { padding: 72px 0 64px; }
+      .hero { max-width: 720px; margin: 0 auto; text-align: center; }
+      .eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid rgba(177, 163, 255, .24); border-radius: 999px; background: rgba(130, 105, 255, .1); color: #c6bcff; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #7ee7bf; box-shadow: 0 0 12px #7ee7bf; }
+      h1 { margin: 22px 0 16px; font-size: clamp(42px, 8vw, 72px); line-height: .99; letter-spacing: -.065em; }
+      h1 span { color: #b8aaff; }
+      .intro { max-width: 590px; margin: 0 auto; color: #b0b4c2; font-size: clamp(16px, 2.4vw, 19px); line-height: 1.65; }
+      .actions { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 30px 0 14px; }
+      .download {
+        display: inline-flex;
+        min-height: 58px;
+        align-items: center;
+        justify-content: center;
+        gap: 11px;
+        padding: 0 25px;
+        border: 0;
+        border-radius: 15px;
+        background: #b7a8ff;
+        color: #171228;
+        font-size: 16px;
+        font-weight: 800;
+        text-decoration: none;
+        box-shadow: 0 12px 42px rgba(132, 107, 255, .25);
+        transition: transform .18s ease, background .18s ease;
+      }
+      .download:hover { transform: translateY(-2px); background: #c9beff; }
+      .download svg { width: 19px; height: 19px; }
+      .file-info { color: #858a9b; font-size: 12px; }
+
+      .versions { margin: 54px auto 0; text-align: left; }
+      .versions-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+      .versions-heading h2 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
+      .versions-heading p { margin: 7px 0 0; color: #969bab; font-size: 13px; line-height: 1.5; }
+      .release-list { display: grid; gap: 11px; margin-top: 18px; }
+      .release-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 18px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 16px; background: rgba(255, 255, 255, .035); }
+      .release-info { min-width: 0; }
+      .release-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 750; }
+      .release-tag { color: #c6bcff; }
+      .release-badge { padding: 4px 7px; border: 1px solid rgba(126, 231, 191, .22); border-radius: 999px; background: rgba(126, 231, 191, .08); color: #91e8c8; font-size: 10px; font-weight: 700; }
+      .release-badge.preview { border-color: rgba(255, 206, 113, .22); background: rgba(255, 206, 113, .08); color: #ffd27d; }
+      .release-meta { margin: 6px 0 0; color: #969bab; font-size: 12px; line-height: 1.5; }
+      .release-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
+      .release-download { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid rgba(183, 168, 255, .32); border-radius: 11px; color: #d2c9ff; font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+      .release-download:hover { background: rgba(183, 168, 255, .1); }
+      .release-notes { color: #9c91d2; font-size: 11px; text-decoration: none; white-space: nowrap; }
+      .release-notes:hover, footer a:hover { text-decoration: underline; }
+      .release-status { margin: 11px 2px 0; color: #858a9b; font-size: 11px; line-height: 1.5; }
+
+      .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin: 52px 0 0; text-align: left; }
+      .feature { min-height: 124px; padding: 20px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 16px; background: rgba(255, 255, 255, .035); }
+      .feature-icon { display: grid; width: 34px; height: 34px; place-items: center; margin-bottom: 15px; border-radius: 10px; background: rgba(177, 163, 255, .12); color: #c4b8ff; font-size: 17px; }
+      .feature strong { display: block; margin-bottom: 5px; font-size: 14px; }
+      .feature p { margin: 0; color: #969bab; font-size: 12px; line-height: 1.55; }
+
+      .install { margin: 58px auto 0; padding: 26px; border: 1px solid rgba(255, 255, 255, .09); border-radius: 18px; background: rgba(255, 255, 255, .025); }
+      .install h2 { margin: 0 0 20px; font-size: 19px; letter-spacing: -.02em; }
+      .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      .step { display: flex; align-items: flex-start; gap: 11px; color: #aeb2bf; font-size: 13px; line-height: 1.6; }
+      .number { display: grid; width: 25px; height: 25px; flex: 0 0 25px; place-items: center; border: 1px solid rgba(177, 163, 255, .3); border-radius: 50%; color: #c6bcff; font-size: 12px; font-weight: 700; }
+
+      .notice { max-width: 690px; margin: 20px auto 0; color: #7f8494; font-size: 11px; line-height: 1.6; text-align: center; }
+      footer { padding: 22px 0 28px; border-top: 1px solid rgba(255, 255, 255, .08); color: #777c8c; font-size: 11px; text-align: center; }
+      footer a { color: #a9a0d8; text-decoration: none; }
+
+      @media (max-width: 640px) {
+        .shell { width: min(100% - 30px, 520px); }
+        header { min-height: 68px; }
+        .header-note { font-size: 11px; }
+        main { padding: 52px 0 46px; }
+        .features, .steps { grid-template-columns: 1fr; }
+        .features { gap: 10px; margin-top: 38px; }
+        .feature { min-height: auto; display: grid; grid-template-columns: 36px 1fr; column-gap: 12px; padding: 15px; }
+        .feature-icon { grid-row: span 2; margin: 0; }
+        .feature strong { align-self: end; }
+        .versions { margin-top: 40px; }
+        .versions-heading { align-items: start; flex-direction: column; gap: 5px; }
+        .release-card { align-items: flex-start; flex-direction: column; gap: 12px; padding: 15px; }
+        .release-actions { width: 100%; justify-content: space-between; }
+        .install { margin-top: 38px; padding: 21px; }
+        .steps { gap: 14px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <a class="brand" href="./" aria-label="SquadVoice home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3m-4 0h8"/></svg>
+          </span>
+          SQUADVOICE
+        </a>
+        <span class="header-note">Android voice rooms</span>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="title">
+          <div class="eyebrow"><span class="dot" aria-hidden="true"></span> BUILT FOR YOUR SQUAD</div>
+          <h1 id="title">Stay in the game<br /><span>together.</span></h1>
+          <p class="intro">A simple voice room for your gaming squad. Talk with your teammates while your game sounds stay on your phone.</p>
+          <div class="actions">
+            <a class="download" href="https://github.com/alok4041/voiceover/releases/latest/download/app-debug.apk" download>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg>
+              Download for Android
+            </a>
+            <span class="file-info">APK · about 65 MB · Android 8.0 and newer</span>
+          </div>
+        </section>
+
+        <section class="versions" aria-labelledby="versions-title">
+          <div class="versions-heading">
+            <div>
+              <h2 id="versions-title">APK versions</h2>
+              <p>Choose a version to install. The newest release is marked for you.</p>
+            </div>
+          </div>
+          <div class="release-list" id="release-list" aria-live="polite">
+            <article class="release-card">
+              <div class="release-info">
+                <h3 class="release-title"><span class="release-tag">v1.0.0</span><span class="release-badge">Latest</span></h3>
+                <p class="release-meta">Android APK · about 65 MB</p>
+              </div>
+              <div class="release-actions">
+                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.0.0/app-debug.apk">Download APK</a>
+                <a class="release-notes" href="https://github.com/alok4041/voiceover/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Release details</a>
+              </div>
+            </article>
+          </div>
+          <p class="release-status" id="release-status" role="status">Showing published versions with an Android APK.</p>
+        </section>
+
+        <section class="features" aria-label="App features">
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">◉</span>
+            <strong>Quick room codes</strong>
+            <p>Create a room and invite your squad with a short code.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">♫</span>
+            <strong>Game audio stays local</strong>
+            <p>SquadVoice sends your microphone, not the game’s sound.</p>
+          </article>
+          <article class="feature">
+            <span class="feature-icon" aria-hidden="true">⌁</span>
+            <strong>Made for play</strong>
+            <p>Mute controls and hold-to-talk are ready when you need them.</p>
+          </article>
+        </section>
+
+        <section class="install" aria-labelledby="install-title">
+          <h2 id="install-title">Get started in three steps</h2>
+          <div class="steps">
+            <div class="step"><span class="number">1</span><span>Download the APK on your Android phone.</span></div>
+            <div class="step"><span class="number">2</span><span>Open the download and follow Android’s install prompts.</span></div>
+            <div class="step"><span class="number">3</span><span>Open SquadVoice, allow microphone access, and join your room.</span></div>
+          </div>
+        </section>
+
+        <p class="notice">SquadVoice is currently shared as a direct APK download, not through Google Play. Android may ask you to allow installation from the browser or file app you used. Only install APKs from sources you trust.</p>
+      </main>
+
+      <footer>SquadVoice · <a href="https://github.com/alok4041/voiceover">Project on GitHub</a></footer>
+    </div>
+    <script>
+      (() => {
+        const releaseList = document.getElementById('release-list');
+        const releaseStatus = document.getElementById('release-status');
+        const releasesUrl = 'https://api.github.com/repos/alok4041/voiceover/releases?per_page=100';
+
+        function formatSize(bytes) {
+          if (!Number.isFinite(bytes) || bytes <= 0) return 'APK';
+          return `${(bytes / (1024 * 1024)).toFixed(1)} MB APK`;
+        }
+
+        function makeReleaseCard(release, latestStableIndex, apk, index) {
+          const card = document.createElement('article');
+          card.className = 'release-card';
+
+          const info = document.createElement('div');
+          info.className = 'release-info';
+          const title = document.createElement('h3');
+          title.className = 'release-title';
+          const tag = document.createElement('span');
+          tag.className = 'release-tag';
+          tag.textContent = release.tag_name || 'Untitled version';
+          title.append(tag);
+
+          const badge = document.createElement('span');
+          badge.className = `release-badge${release.prerelease ? ' preview' : ''}`;
+          badge.textContent = release.prerelease ? 'Pre-release' : (index === latestStableIndex ? 'Latest' : 'Stable');
+          title.append(badge);
+
+          const meta = document.createElement('p');
+          meta.className = 'release-meta';
+          const published = release.published_at
+            ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(release.published_at))
+            : 'Date unavailable';
+          const releaseName = release.name && release.name !== release.tag_name ? ` · ${release.name}` : '';
+          meta.textContent = `${formatSize(apk.size)} · Published ${published}${releaseName}`;
+          info.append(title, meta);
+
+          const actions = document.createElement('div');
+          actions.className = 'release-actions';
+          const download = document.createElement('a');
+          download.className = 'release-download';
+          download.href = apk.browser_download_url;
+          download.textContent = 'Download APK';
+          const details = document.createElement('a');
+          details.className = 'release-notes';
+          details.href = release.html_url;
+          details.target = '_blank';
+          details.rel = 'noopener noreferrer';
+          details.textContent = 'Release details';
+          actions.append(download, details);
+          card.append(info, actions);
+          return card;
+        }
+
+        fetch(releasesUrl, { headers: { Accept: 'application/vnd.github+json' } })
+          .then((response) => {
+            if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+            return response.json();
+          })
+          .then((releases) => {
+            const publishedApks = releases
+              .filter((release) => !release.draft)
+              .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name.toLowerCase().endsWith('.apk')) }))
+              .filter(({ apk }) => apk);
+
+            if (publishedApks.length === 0) {
+              releaseStatus.textContent = 'No APK releases are published yet. Check GitHub Releases for updates.';
+              return;
+            }
+
+            const latestStableIndex = publishedApks.findIndex(({ release }) => !release.prerelease);
+            releaseList.replaceChildren(...publishedApks.map(({ release, apk }, index) => makeReleaseCard(release, latestStableIndex, apk, index)));
+            releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
+          })
+          .catch(() => {
+            releaseStatus.textContent = 'Showing the saved version list. Open GitHub Releases to check for newer builds.';
+          });
+      })();
+    </script>
+  </body>
+</html>
