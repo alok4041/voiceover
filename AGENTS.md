@@ -15,7 +15,7 @@ Last reviewed: 2026-10-16 (Asia/Kolkata). Recheck the live site and service befo
 
 The website reads published GitHub Releases to list APK versions and download links. The Android update checker reads the latest GitHub Release. The web page also has a saved fallback release card in case GitHub's release API is unavailable. The root `index.html` is used for GitHub Pages; `token-server/public/index.html` is a copy served by Express. Keep the copies aligned if changing the website.
 
-At this release preparation, the Android version is `1.1.9`, `versionCode` 11, and the latest previously published release tag was `v1.1.8`. Verify GitHub Releases before telling users which APK is newest.
+The Android app is at version `1.1.9`, `versionCode` 11. Check GitHub Releases before telling users which APK is newest; the website and in-app checker use the public Releases API.
 
 ## What the app does
 
@@ -90,26 +90,26 @@ git diff
 
 Never run destructive cleanup (`git reset --hard`, `git clean`, forced checkout, or force-push) unless the user explicitly asks. Do not overwrite unrelated modified files. Stage named files instead of blindly running `git add .`.
 
+This is one project. Use the existing `main` branch for routine requested work; do not create a worktree or feature branch by default. Use a short-lived branch only when the user asks for isolation or a change needs separate review.
+
 Recommended contribution flow:
 
 ```sh
-git switch -c codex/short-change-name
+git status --short --branch
 # edit only the requested files
 git diff --check
 git status --short
 git diff
 git add path/to/reviewed-file
 git commit -m "Describe the change"
-git push -u origin codex/short-change-name
+# For a requested publication, push the committed main branch and verify the live result.
 ```
 
-The live Render service and GitHub Pages are connected to the `main` branch in the known deployment setup. A push or merge to `main` may publish immediately. Do not push to `main`, merge a release PR, tag a release, publish an APK, or trigger a manual deployment without the user's explicit approval. Avoid committing unrelated changes along with the requested work.
-
-At the time this guide was written, the local `main` branch was two commits ahead of its recorded `origin/main`, and there were modified Android files in the working tree. Network access did not allow checking GitHub's current branch state. Inspect `git status` and compare with `git fetch origin` before deciding what is safe to push; do not assume the local and remote histories match or discard either side.
+The live Render service and GitHub Pages are connected to the `main` branch in the known deployment setup. A push to `main` publishes the website and may trigger a Render deployment. When the user directly asks to publish a website or app change, treat that as authorization for the requested publication; do not ask a redundant second time whether to update the site. Complete the work, review it, commit it, publish it, and verify the live result. If publication may interrupt the live API or an active room, ask only about that specific interruption unless the user has already authorized it. Never install or update the user's phone unless they directly ask.
 
 ## Publishing a website change
 
-The configured GitHub Pages site is served from the repository root. Check **GitHub → Settings → Pages** if its publishing source ever changes. A change to root `index.html` becomes public when committed to the configured branch (`main` in the known setup). If editing the website, update `token-server/public/index.html` too so the Render static copy does not go stale. Review the diff and links before asking the user to approve a live push.
+The configured GitHub Pages site is served from the repository root. Check **GitHub → Settings → Pages** if its publishing source ever changes. A change to root `index.html` becomes public after it is pushed to the configured branch (`main` in the known setup). If editing the website, update `token-server/public/index.html` too so the Render static copy stays aligned. Review the diff and links, then publish when the user has requested the website change; do not stop after a local commit.
 
 Do not deploy the website through Render as a substitute for GitHub Pages; the canonical download site URL above is the GitHub Pages URL.
 
@@ -137,7 +137,7 @@ Before a new app release:
 5. Create a GitHub Release for the matching tag and attach the APK using the expected filename `app-debug.apk`; write clear notes and label a preview as pre-release where appropriate.
 6. Check the Release entry, website download buttons, and update checker after GitHub publishes it.
 
-The user has explicitly asked to be consulted before publishing new app versions. Treat uploading a GitHub Release, creating/pushing its tag, or pushing code that changes the live website/API as publication and wait for approval.
+The user has explicitly asked to be consulted before publishing a new Android APK release. A direct request to publish a website update authorizes the needed website publication. Ask before a deployment step that may interrupt the live API unless the user has authorized that interruption. Never install the APK on the user's phone unless asked.
 
 ## Render API deployment
 
@@ -149,7 +149,7 @@ The Render service runs the Node token server. `server.js` listens on `process.e
 
 Render supplies `PORT`. The local `.env` is for development only; production values belong in Render's private Environment settings. Do not place secrets in build arguments, GitHub Actions logs, screenshots, source code, website JavaScript, app resources, or GitHub Pages.
 
-Render has been configured to build from this GitHub repository, branch `main`, with the `token-server` directory as the Node service root in the known setup. The previous deployment logs showed a successful Node server start and the health endpoint returned `{"ok":true}` in the user's browser. Confirm current Render settings and logs before changing them. A `main` push may cause an automatic deployment. Do not restart, cancel, or redeploy the live service without the user's approval, because it can temporarily interrupt room creation/joining.
+Render has been configured to build from this GitHub repository, branch `main`, with the `token-server` directory as the Node service root in the known setup. The previous deployment logs showed a successful Node server start and the health endpoint returned `{"ok":true}` in the user's browser. Confirm current Render settings and logs before changing them. A `main` push may cause an automatic deployment that briefly interrupts room creation/joining; if the user requested only a website publication and has not authorized that interruption, ask about this specific impact before pushing.
 
 The backend currently has no persistent store or request rate limiter. It is reachable publicly. Before significantly widening distribution, consider abuse/rate-limit protections and monitoring; make and deploy such changes only with approval.
 
@@ -168,6 +168,6 @@ The backend currently has no persistent store or request rate limiter. It is rea
 - Start with `git status`; preserve existing changes.
 - Make only the requested change and explain the files touched.
 - Keep secrets out of tracked files and logs.
-- Do not install on devices, leave/join a live room, stop services, push a live deployment, publish an APK, or create a release without the user's explicit approval.
+- Carry out changes and publication directly requested by the user without redundant confirmation. Ask before installing on devices, changing an active room, stopping services, or causing a likely interruption unless the user explicitly authorized that impact.
 - Before a release, show the concrete version, APK artifact, signing implications, release notes, and deployment plan, then ask for approval.
 - Verify health and release links after an approved deployment; never infer success merely from a local build.
