@@ -6,3 +6,4 @@ token-server/.env
 *.jks
 *.keystore
 .docs
+docs/ropebound-game-design.md
