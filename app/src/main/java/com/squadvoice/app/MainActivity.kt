@@ -6,6 +6,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -73,13 +75,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val preferences = getSharedPreferences("squadvoice", MODE_PRIVATE)
+        val initialDarkMode = preferences.getBoolean("dark_mode", true)
+        applySystemBarTheme(initialDarkMode)
         setContent {
-            val preferences = remember { getSharedPreferences("squadvoice", MODE_PRIVATE) }
             var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
             SquadVoiceTheme(darkMode) {
                 SquadVoiceApp(
@@ -87,9 +92,21 @@ class MainActivity : ComponentActivity() {
                     onToggleTheme = {
                         darkMode = !darkMode
                         preferences.edit().putBoolean("dark_mode", darkMode).apply()
+                        applySystemBarTheme(darkMode)
                     },
                 )
             }
+        }
+    }
+
+    private fun applySystemBarTheme(darkMode: Boolean) {
+        val color = AndroidColor.parseColor(if (darkMode) "#0A1012" else "#F4FAF9")
+        window.setBackgroundDrawable(ColorDrawable(color))
+        window.statusBarColor = color
+        window.navigationBarColor = color
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !darkMode
+            isAppearanceLightNavigationBars = !darkMode
         }
     }
 }
