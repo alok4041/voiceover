@@ -91,8 +91,11 @@
       .release-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; }
       .release-download { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 14px; border: 1px solid rgba(183, 168, 255, .32); border-radius: 11px; color: #d2c9ff; font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; }
       .release-download:hover { background: rgba(183, 168, 255, .1); }
-      .release-notes { color: #9c91d2; font-size: 11px; text-decoration: none; white-space: nowrap; }
-      .release-notes:hover, footer a:hover { text-decoration: underline; }
+      .release-card { flex-wrap: wrap; }
+      .release-details { flex: 1 0 100%; border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 10px; color: #9c91d2; font-size: 11px; }
+      .release-details summary { width: fit-content; cursor: pointer; font-weight: 650; }
+      .release-details[open] summary { margin-bottom: 8px; }
+      .release-body { margin: 0; color: #aeb2bf; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
       .release-status { margin: 11px 2px 0; color: #858a9b; font-size: 11px; line-height: 1.5; }
 
       .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 13px; margin: 52px 0 0; text-align: left; }
@@ -170,23 +173,23 @@
           <div class="release-list" id="release-list" aria-live="polite">
             <article class="release-card">
               <div class="release-info">
-                <h3 class="release-title"><span class="release-tag">v1.1.5</span><span class="release-badge">Latest</span></h3>
-                <p class="release-meta">Android APK · about 66 MB</p>
+                <h3 class="release-title"><span class="release-tag">v1.1.6</span><span class="release-badge">Latest</span></h3>
+                <p class="release-meta">Android APK · about 65 MB · SquadVoice 1.1.6</p>
               </div>
               <div class="release-actions">
-                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.5/app-debug.apk">Download APK</a>
-                <a class="release-notes" href="https://github.com/alok4041/voiceover/releases/tag/v1.1.5" target="_blank" rel="noopener noreferrer">Release details</a>
+                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.6/app-debug.apk">Download APK</a>
               </div>
+              <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.6 adds a Settings page with Day/Night mode, five accent colors, and an About the Author section.</p></details>
             </article>
             <article class="release-card">
               <div class="release-info">
-                <h3 class="release-title"><span class="release-tag">v1.0.0</span></h3>
+                <h3 class="release-title"><span class="release-tag">v1.1.5</span><span class="release-badge">Stable</span></h3>
                 <p class="release-meta">Android APK · about 65 MB</p>
               </div>
               <div class="release-actions">
-                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.0.0/app-debug.apk">Download APK</a>
-                <a class="release-notes" href="https://github.com/alok4041/voiceover/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Release details</a>
+                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.5/app-debug.apk">Download APK</a>
               </div>
+              <details class="release-details"><summary>Release details</summary><p class="release-body">Android testing APK for SquadVoice.</p></details>
             </article>
           </div>
           <p class="release-status" id="release-status" role="status">Showing 2 available versions with an Android APK.</p>
@@ -222,7 +225,7 @@
         <p class="notice">SquadVoice is currently shared as a direct APK download, not through Google Play. Android may ask you to allow installation from the browser or file app you used. Only install APKs from sources you trust.</p>
       </main>
 
-      <footer>SquadVoice · <a href="https://github.com/alok4041/voiceover">Project on GitHub</a></footer>
+      <footer>SquadVoice · Voice for your squad</footer>
     </div>
     <script>
       (() => {
@@ -269,14 +272,17 @@
           download.className = 'release-download';
           download.href = apk.browser_download_url;
           download.textContent = 'Download APK';
-          const details = document.createElement('a');
-          details.className = 'release-notes';
-          details.href = release.html_url;
-          details.target = '_blank';
-          details.rel = 'noopener noreferrer';
-          details.textContent = 'Release details';
-          actions.append(download, details);
-          card.append(info, actions);
+          actions.append(download);
+
+          const details = document.createElement('details');
+          details.className = 'release-details';
+          const summary = document.createElement('summary');
+          summary.textContent = 'Release details';
+          const notes = document.createElement('p');
+          notes.className = 'release-body';
+          notes.textContent = release.body?.trim() || 'No release notes were added for this version.';
+          details.append(summary, notes);
+          card.append(info, actions, details);
           return card;
         }
 
@@ -313,7 +319,7 @@
             releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
           })
           .catch(() => {
-            releaseStatus.textContent = 'Showing the saved version list. Open GitHub Releases to check for newer builds.';
+            releaseStatus.textContent = 'Showing the saved version list. Check back later for newer builds.';
           });
       })();
     </script>

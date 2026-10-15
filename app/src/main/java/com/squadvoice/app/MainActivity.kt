@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,6 +72,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -86,16 +88,25 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val preferences = getSharedPreferences("squadvoice", MODE_PRIVATE)
         val initialDarkMode = preferences.getBoolean("dark_mode", true)
+        val initialAccentTheme = preferences.getString("accent_theme", "teal") ?: "teal"
         applySystemBarTheme(initialDarkMode)
         setContent {
             var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
-            SquadVoiceTheme(darkMode) {
+            var accentTheme by rememberSaveable {
+                mutableStateOf(preferences.getString("accent_theme", initialAccentTheme) ?: initialAccentTheme)
+            }
+            SquadVoiceTheme(darkMode, accentTheme) {
                 SquadVoiceApp(
                     darkMode = darkMode,
+                    accentTheme = accentTheme,
                     onToggleTheme = {
                         darkMode = !darkMode
                         preferences.edit().putBoolean("dark_mode", darkMode).apply()
                         applySystemBarTheme(darkMode)
+                    },
+                    onSelectAccentTheme = { selectedTheme ->
+                        accentTheme = selectedTheme
+                        preferences.edit().putString("accent_theme", selectedTheme).apply()
                     },
                 )
             }
@@ -127,15 +138,72 @@ private val MutedText: Color
 private val Alert: Color
     @Composable get() = MaterialTheme.colorScheme.error
 
+private data class AccentPalette(
+    val id: String,
+    val name: String,
+    val swatch: Color,
+    val darkPrimary: Color,
+    val darkOnPrimary: Color,
+    val darkPrimaryContainer: Color,
+    val darkOnPrimaryContainer: Color,
+    val lightPrimary: Color,
+    val lightOnPrimary: Color,
+    val lightPrimaryContainer: Color,
+    val lightOnPrimaryContainer: Color,
+)
+
+private val accentPalettes = listOf(
+    AccentPalette(
+        id = "teal", name = "Squad Teal", swatch = Color(0xFF55E2C8),
+        darkPrimary = Color(0xFF8BE8D5), darkOnPrimary = Color(0xFF003832),
+        darkPrimaryContainer = Color(0xFF005048), darkOnPrimaryContainer = Color(0xFFB7F3E7),
+        lightPrimary = Color(0xFF006B5F), lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFB7F3E7), lightOnPrimaryContainer = Color(0xFF00201B),
+    ),
+    AccentPalette(
+        id = "violet", name = "Violet", swatch = Color(0xFFC6A7FF),
+        darkPrimary = Color(0xFFD0BCFF), darkOnPrimary = Color(0xFF381E72),
+        darkPrimaryContainer = Color(0xFF4F378B), darkOnPrimaryContainer = Color(0xFFE9DDFF),
+        lightPrimary = Color(0xFF6750A4), lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFEADDFF), lightOnPrimaryContainer = Color(0xFF21005D),
+    ),
+    AccentPalette(
+        id = "ocean", name = "Ocean Blue", swatch = Color(0xFF76B8FF),
+        darkPrimary = Color(0xFFA9C7FF), darkOnPrimary = Color(0xFF00315A),
+        darkPrimaryContainer = Color(0xFF00497F), darkOnPrimaryContainer = Color(0xFFD3E4FF),
+        lightPrimary = Color(0xFF0061A4), lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFD2E4FF), lightOnPrimaryContainer = Color(0xFF001C38),
+    ),
+    AccentPalette(
+        id = "sunset", name = "Sunset Orange", swatch = Color(0xFFFFB77D),
+        darkPrimary = Color(0xFFFFB77D), darkOnPrimary = Color(0xFF4A2800),
+        darkPrimaryContainer = Color(0xFF693C00), darkOnPrimaryContainer = Color(0xFFFFDCBE),
+        lightPrimary = Color(0xFF8A4C00), lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFFFDCBE), lightOnPrimaryContainer = Color(0xFF2D1600),
+    ),
+    AccentPalette(
+        id = "rose", name = "Rose", swatch = Color(0xFFFF9FB5),
+        darkPrimary = Color(0xFFFFB2C1), darkOnPrimary = Color(0xFF5E1132),
+        darkPrimaryContainer = Color(0xFF7B2948), darkOnPrimaryContainer = Color(0xFFFFD9E1),
+        lightPrimary = Color(0xFFB01B58), lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFFFD9E1), lightOnPrimaryContainer = Color(0xFF3E001D),
+    ),
+)
+
 @Composable
-private fun SquadVoiceTheme(darkMode: Boolean, content: @Composable () -> Unit) {
+private fun SquadVoiceTheme(
+    darkMode: Boolean,
+    accentTheme: String,
+    content: @Composable () -> Unit,
+) {
+    val accent = accentPalettes.firstOrNull { it.id == accentTheme } ?: accentPalettes.first()
     MaterialTheme(
         colorScheme = if (darkMode) {
             darkColorScheme(
-                primary = Color(0xFF8BE8D5),
-                onPrimary = Color(0xFF003832),
-                primaryContainer = Color(0xFF005048),
-                onPrimaryContainer = Color(0xFFB7F3E7),
+                primary = accent.darkPrimary,
+                onPrimary = accent.darkOnPrimary,
+                primaryContainer = accent.darkPrimaryContainer,
+                onPrimaryContainer = accent.darkOnPrimaryContainer,
                 background = Color(0xFF0A1012),
                 onBackground = Color(0xFFE4ECEC),
                 surface = Color(0xFF111A1D),
@@ -147,10 +215,10 @@ private fun SquadVoiceTheme(darkMode: Boolean, content: @Composable () -> Unit) 
             )
         } else {
             lightColorScheme(
-                primary = Color(0xFF006B5F),
-                onPrimary = Color.White,
-                primaryContainer = Color(0xFFB7F3E7),
-                onPrimaryContainer = Color(0xFF00201B),
+                primary = accent.lightPrimary,
+                onPrimary = accent.lightOnPrimary,
+                primaryContainer = accent.lightPrimaryContainer,
+                onPrimaryContainer = accent.lightOnPrimaryContainer,
                 background = Color(0xFFF4FAF9),
                 onBackground = Color(0xFF161D1B),
                 surface = Color.White,
@@ -166,7 +234,12 @@ private fun SquadVoiceTheme(darkMode: Boolean, content: @Composable () -> Unit) 
 }
 
 @Composable
-private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
+private fun SquadVoiceApp(
+    darkMode: Boolean,
+    accentTheme: String,
+    onToggleTheme: () -> Unit,
+    onSelectAccentTheme: (String) -> Unit,
+) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("squadvoice", Context.MODE_PRIVATE) }
     val api = remember { RoomApi() }
@@ -203,6 +276,11 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     var pendingRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var overlayEnabled by remember { mutableStateOf(OverlayControlsService.isRunning) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = showSettings) {
+        showSettings = false
+    }
 
     DisposableEffect(preferences) {
         val roomPreferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
@@ -375,7 +453,15 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         color = Ink,
     ) {
-        if (isInRoom && activeRoom != null) {
+        if (showSettings) {
+            SettingsScreen(
+                darkMode = darkMode,
+                accentTheme = accentTheme,
+                onToggleTheme = onToggleTheme,
+                onSelectAccentTheme = onSelectAccentTheme,
+                onBack = { showSettings = false },
+            )
+        } else if (isInRoom && activeRoom != null) {
             RoomScreen(
                 room = activeRoom,
                 session = session,
@@ -391,6 +477,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 overlayEnabled = overlayEnabled,
                 darkMode = darkMode,
                 onToggleTheme = onToggleTheme,
+                onOpenSettings = { showSettings = true },
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onSetParticipantVolume = { identity, volumePercent ->
@@ -448,6 +535,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 errorMessage = errorMessage,
                 darkMode = darkMode,
                 onToggleTheme = onToggleTheme,
+                onOpenSettings = { showSettings = true },
                 onPlayerNameChange = {
                     playerName = it
                     preferences.edit().putString("player_name", it).apply()
@@ -486,6 +574,7 @@ private fun HomeScreen(
     errorMessage: String?,
     darkMode: Boolean,
     onToggleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     onPlayerNameChange: (String) -> Unit,
     onRoomNameChange: (String) -> Unit,
     onJoinCodeChange: (String) -> Unit,
@@ -516,6 +605,7 @@ private fun HomeScreen(
             }
             Spacer(Modifier.weight(1f))
             TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
+            TextButtonLabel("⚙", onOpenSettings, accessibilityLabel = "Open settings")
         }
 
         Spacer(Modifier.height(3.dp))
@@ -595,6 +685,115 @@ private fun HomeScreen(
 }
 
 @Composable
+private fun SettingsScreen(
+    darkMode: Boolean,
+    accentTheme: String,
+    onToggleTheme: () -> Unit,
+    onSelectAccentTheme: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButtonLabel("← Back", onBack, accessibilityLabel = "Back")
+            Spacer(Modifier.width(14.dp))
+            Text("Settings", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("MAKE IT YOURS", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+            Text("Appearance", fontSize = 21.sp, fontWeight = FontWeight.Bold)
+            Text("Choose how SquadVoice looks on this phone.", color = MutedText, fontSize = 13.sp)
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Panel)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(if (darkMode) "Night mode" else "Day mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Switch between light and dark appearance", color = MutedText, fontSize = 11.sp)
+            }
+            Switch(checked = darkMode, onCheckedChange = { onToggleTheme() })
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("COLOR THEMES", fontSize = 11.sp, color = MutedText, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
+            Text("Pick an accent color", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Your choice is saved on this device and used in both day and night mode.", color = MutedText, fontSize = 12.sp, lineHeight = 17.sp)
+            accentPalettes.forEach { palette ->
+                val isSelected = palette.id == accentTheme
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(17.dp))
+                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Panel)
+                        .clickable { onSelectAccentTheme(palette.id) }
+                        .padding(horizontal = 15.dp, vertical = 13.dp)
+                        .semantics {
+                            role = Role.RadioButton
+                            contentDescription = "${palette.name}${if (isSelected) ", selected" else ""}"
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(palette.swatch)
+                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), CircleShape),
+                    )
+                    Spacer(Modifier.width(13.dp))
+                    Text(palette.name, modifier = Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    if (isSelected) {
+                        Text("✓ Selected", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        SectionCard(
+            kicker = "ABOUT",
+            title = "About the author",
+            detail = "SquadVoice was created for gaming teams who want to talk while keeping game audio on their device.",
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Mint),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("A", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Alok Kumar", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Creator of SquadVoice", color = MutedText, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Text(
+            "SquadVoice · Voice for your squad",
+            color = MutedText,
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp),
+        )
+    }
+}
+
+@Composable
 private fun RoomScreen(
     room: RoomCredentials,
     session: VoiceSessionState,
@@ -604,6 +803,7 @@ private fun RoomScreen(
     overlayEnabled: Boolean,
     darkMode: Boolean,
     onToggleTheme: () -> Unit,
+    onOpenSettings: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
     onSetParticipantVolume: (String, Int) -> Unit,
@@ -625,10 +825,11 @@ private fun RoomScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("VOICE ROOM", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
-                Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.weight(1f))
             TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
+            TextButtonLabel("⚙", onOpenSettings, accessibilityLabel = "Open settings")
             Button(
                 onClick = onLeave,
                 colors = ButtonDefaults.buttonColors(
@@ -944,7 +1145,11 @@ private fun PrimaryAction(label: String, enabled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun TextButtonLabel(label: String, onClick: () -> Unit) {
+private fun TextButtonLabel(
+    label: String,
+    onClick: () -> Unit,
+    accessibilityLabel: String = label,
+) {
     Text(
         label,
         color = Mint,
@@ -955,7 +1160,7 @@ private fun TextButtonLabel(label: String, onClick: () -> Unit) {
             .background(RaisedPanel)
             .padding(horizontal = 12.dp, vertical = 7.dp)
             .clickable(onClick = onClick)
-            .semantics { contentDescription = label },
+            .semantics { contentDescription = accessibilityLabel },
     )
 }
 
