@@ -154,12 +154,11 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val session by VoiceSessionManager.state.collectAsState()
 
-    val isSessionActive = VoiceSessionManager.state.value.isConnected || VoiceSessionManager.state.value.isConnecting
-    val restoredRoomCode = if (isSessionActive) preferences.getString("room_code", null) else null
-    val restoredRoomName = if (isSessionActive) preferences.getString("room_name", null) else null
-    val restoredServerUrl = if (isSessionActive) preferences.getString("server_url", null) else null
-    val restoredParticipantToken = if (isSessionActive) preferences.getString("participant_token", null) else null
-    val canRestoreSession = isSessionActive &&
+    val restoredRoomCode = preferences.getString("room_code", null)
+    val restoredRoomName = preferences.getString("room_name", null)
+    val restoredServerUrl = preferences.getString("server_url", null)
+    val restoredParticipantToken = preferences.getString("participant_token", null)
+    val canRestoreSession =
         !restoredRoomCode.isNullOrBlank() &&
         !restoredRoomName.isNullOrBlank() &&
         !restoredServerUrl.isNullOrBlank() &&
@@ -168,10 +167,10 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     var playerName by rememberSaveable { mutableStateOf(preferences.getString("player_name", "") ?: "") }
     var roomName by rememberSaveable { mutableStateOf("") }
     var joinCode by rememberSaveable { mutableStateOf("") }
-    var savedRoomCode by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredRoomCode else null) }
-    var savedRoomName by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredRoomName else null) }
-    var savedServerUrl by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredServerUrl else null) }
-    var savedParticipantToken by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredParticipantToken else null) }
+    var savedRoomCode by remember { mutableStateOf(if (canRestoreSession) restoredRoomCode else null) }
+    var savedRoomName by remember { mutableStateOf(if (canRestoreSession) restoredRoomName else null) }
+    var savedServerUrl by remember { mutableStateOf(if (canRestoreSession) restoredServerUrl else null) }
+    var savedParticipantToken by remember { mutableStateOf(if (canRestoreSession) restoredParticipantToken else null) }
     val activeRoom = if (
         savedRoomCode != null && savedRoomName != null && savedServerUrl != null && savedParticipantToken != null
     ) {
@@ -179,7 +178,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     } else {
         null
     }
-    var isInRoom by rememberSaveable { mutableStateOf(canRestoreSession) }
+    var isInRoom by remember { mutableStateOf(canRestoreSession) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pendingRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -216,7 +215,14 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
             } else {
                 overlayEnabled = OverlayControlsService.isRunning
             }
-        } else if (!isLoading && isInRoom) {
+        } else if (
+            !isLoading &&
+            isInRoom &&
+            preferences.getString("room_code", null).isNullOrBlank()
+        ) {
+            // A missing room code means the user explicitly left (including from the
+            // notification). Keep the room screen on transient disconnects so it can
+            // recover when the service reconnects.
             OverlayControlsService.stop(context)
             savedRoomCode = null
             savedRoomName = null
@@ -224,13 +230,6 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
             savedParticipantToken = null
             isInRoom = false
             overlayEnabled = false
-            preferences.edit()
-                .remove("room_code")
-                .remove("room_name")
-                .remove("server_url")
-                .remove("participant_token")
-                .remove("overlay_enabled")
-                .apply()
         }
     }
 
@@ -345,6 +344,13 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 room = activeRoom,
                 session = session,
                 errorMessage = errorMessage ?: session.errorMessage,
+                onReconnect = {
+                    errorMessage = null
+                    runCatching { VoiceRoomService.start(context, activeRoom, playerName.trim()) }
+                        .onFailure { error ->
+                            errorMessage = error.message ?: "Android couldn't reconnect to the room."
+                        }
+                },
                 pushToTalk = pushToTalk,
                 overlayEnabled = overlayEnabled,
                 darkMode = darkMode,
@@ -555,6 +561,7 @@ private fun RoomScreen(
     room: RoomCredentials,
     session: VoiceSessionState,
     errorMessage: String?,
+    onReconnect: () -> Unit,
     pushToTalk: Boolean,
     overlayEnabled: Boolean,
     darkMode: Boolean,
@@ -653,6 +660,14 @@ private fun RoomScreen(
             onToggle = onToggleMicrophone,
             onSetMicrophone = onSetMicrophone,
         )
+
+        if (!session.isConnected && !session.isConnecting) {
+            Button(
+                onClick = onReconnect,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(15.dp),
+            ) { Text("Reconnect to room") }
+        }
 
         Row(
             modifier = Modifier
@@ -768,7 +783,7 @@ private fun MicControl(
             Text(
                 when {
                     !enabled && isConnecting -> "Joining your squad"
-                    !enabled -> "Leave and rejoin to try again"
+                    !enabled -> "Tap Reconnect to try again"
                     pushToTalk -> "Release to mute"
                     micEnabled -> "Tap to mute your voice"
                     else -> "Your squad can't hear you yet"

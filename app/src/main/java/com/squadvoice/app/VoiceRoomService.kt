@@ -39,6 +39,13 @@ class VoiceRoomService : Service() {
             }
 
             ACTION_LEAVE -> {
+                getSharedPreferences("squadvoice", MODE_PRIVATE).edit()
+                    .remove("room_code")
+                    .remove("room_name")
+                    .remove("server_url")
+                    .remove("participant_token")
+                    .remove("overlay_enabled")
+                    .apply()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -135,6 +142,10 @@ class VoiceRoomService : Service() {
             )
             .addAction(R.drawable.ic_close_notification, "Leave", leaveRoom)
             .build()
+            .apply {
+                // Keep the active-room notification visible until the user taps Leave.
+                flags = flags or Notification.FLAG_NO_CLEAR
+            }
     }
 
     private fun createNotificationChannel() {

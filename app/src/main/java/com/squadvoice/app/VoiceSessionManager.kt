@@ -93,6 +93,7 @@ object VoiceSessionManager {
                                     errorMessage = null,
                                 )
                             }
+                            publishParticipants(newRoom)
                         }
 
                         is RoomEvent.Disconnected -> {
@@ -101,6 +102,7 @@ object VoiceSessionManager {
                                     isConnecting = false,
                                     isConnected = false,
                                     micEnabled = false,
+                                    participants = emptyList(),
                                     errorMessage = event.error?.message ?: "Disconnected from the voice room.",
                                 )
                             }
