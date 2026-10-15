@@ -9,6 +9,7 @@ import io.livekit.android.LiveKit
 import io.livekit.android.LiveKitOverrides
 import io.livekit.android.audio.NoAudioHandler
 import io.livekit.android.events.RoomEvent
+import io.livekit.audio.krisp.KrispAudioProcessor
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.participant.RemoteParticipant
@@ -17,6 +18,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +34,7 @@ data class ParticipantUi(
     val name: String,
     val isLocal: Boolean,
     val isSpeaking: Boolean,
+    val microphoneEnabled: Boolean,
     val volumePercent: Int = 100,
 )
 
@@ -38,6 +44,8 @@ data class VoiceSessionState(
     val micEnabled: Boolean = false,
     val participants: List<ParticipantUi> = emptyList(),
     val errorMessage: String? = null,
+    val noiseCancellationActive: Boolean = false,
+    val noiseCancellationMessage: String? = null,
 )
 
 /** Keeps the LiveKit room alive independently of the screen while the foreground service runs. */
@@ -52,6 +60,10 @@ object VoiceSessionManager {
     private var localIdentity: String = ""
     private var activeSpeakerIds: Set<String> = emptySet()
     private val participantVolumePercent = mutableMapOf<String, Int>()
+    private val noiseProcessorMutex = Mutex()
+    private val noiseSettingsMutex = Mutex()
+    private var krispProcessor: KrispAudioProcessor? = null
+    private var deepFilterNetProcessor: DeepFilterNetCaptureProcessor? = null
 
     fun connect(context: Context, credentials: RoomCredentials, participantName: String) {
         scope.launch {
@@ -132,6 +144,18 @@ object VoiceSessionManager {
                         is RoomEvent.ParticipantDisconnected,
                         is RoomEvent.ParticipantNameChanged -> publishParticipants(newRoom)
 
+                        is RoomEvent.TrackMuted -> {
+                            if (event.publication.kind == io.livekit.android.room.track.Track.Kind.AUDIO) {
+                                publishParticipants(newRoom)
+                            }
+                        }
+
+                        is RoomEvent.TrackUnmuted -> {
+                            if (event.publication.kind == io.livekit.android.room.track.Track.Kind.AUDIO) {
+                                publishParticipants(newRoom)
+                            }
+                        }
+
                         is RoomEvent.TrackSubscribed -> {
                             val identity = event.participant.identity?.value
                             val audioTrack = event.track as? RemoteAudioTrack
@@ -148,13 +172,33 @@ object VoiceSessionManager {
 
             try {
                 newRoom.connect(credentials.serverUrl, credentials.participantToken)
+                var noiseCancellationMessage: String? = null
+                var appliedNoiseMode = MicNoiseMode.NORMAL
+                noiseSettingsMutex.withLock {
+                    val requestedNoiseMode = MicNoiseMode.fromPreferences(
+                        context.getSharedPreferences("squadvoice", Context.MODE_PRIVATE),
+                    )
+                    runCatching { applyMicNoiseMode(context, newRoom, requestedNoiseMode) }
+                        .onSuccess { appliedNoiseMode = requestedNoiseMode }
+                        .onFailure { error ->
+                            noiseCancellationMessage = noiseCancellationUnavailableMessage(requestedNoiseMode, error)
+                            runCatching { applyMicNoiseMode(context, newRoom, MicNoiseMode.NORMAL) }
+                        }
+                }
                 localIdentity = newRoom.localParticipant.identity?.value.orEmpty()
                 val microphoneStarted = newRoom.localParticipant.setMicrophoneEnabled(true)
                 if (!microphoneStarted) {
                     throw IllegalStateException("Microphone could not start. Check app microphone access and try again.")
                 }
                 mutableState.update {
-                    it.copy(isConnecting = false, isConnected = true, micEnabled = true, errorMessage = null)
+                    it.copy(
+                        isConnecting = false,
+                        isConnected = true,
+                        micEnabled = true,
+                        errorMessage = null,
+                        noiseCancellationActive = appliedNoiseMode != MicNoiseMode.NORMAL,
+                        noiseCancellationMessage = noiseCancellationMessage,
+                    )
                 }
                 publishParticipants(newRoom)
             } catch (error: Throwable) {
@@ -179,6 +223,7 @@ object VoiceSessionManager {
                 .onSuccess { changed ->
                     if (changed) {
                         mutableState.update { it.copy(micEnabled = enabled, errorMessage = null) }
+                        publishParticipants(currentRoom)
                     } else {
                         mutableState.update { it.copy(errorMessage = "Microphone state did not change. Check microphone access.") }
                     }
@@ -188,6 +233,95 @@ object VoiceSessionManager {
                         it.copy(errorMessage = error.message ?: "Couldn't change microphone state.")
                     }
                 }
+        }
+    }
+
+    /** Applies the selected filter to this device's outgoing microphone without reconnecting the room. */
+    internal fun setMicNoiseMode(context: Context, mode: MicNoiseMode) {
+        scope.launch {
+            noiseSettingsMutex.withLock {
+                val currentRoom = room
+                if (currentRoom == null) {
+                    mutableState.update {
+                        it.copy(noiseCancellationActive = false, noiseCancellationMessage = null)
+                    }
+                    return@withLock
+                }
+
+                runCatching { applyMicNoiseMode(context, currentRoom, mode) }
+                    .onSuccess {
+                        mutableState.update {
+                            it.copy(
+                                noiseCancellationActive = mode != MicNoiseMode.NORMAL,
+                                noiseCancellationMessage = null,
+                            )
+                        }
+                    }
+                    .onFailure { error ->
+                        mutableState.update {
+                            it.copy(
+                                noiseCancellationActive = false,
+                                noiseCancellationMessage = noiseCancellationUnavailableMessage(mode, error),
+                            )
+                        }
+                        runCatching { applyMicNoiseMode(context, currentRoom, MicNoiseMode.NORMAL) }
+                    }
+            }
+        }
+    }
+
+    private suspend fun applyMicNoiseMode(context: Context, currentRoom: Room, mode: MicNoiseMode) {
+        val controller = currentRoom.audioProcessingController
+        when (mode) {
+            MicNoiseMode.NORMAL -> {
+                controller.bypassCapturePostProcessing = true
+                controller.capturePostProcessor = null
+            }
+
+            MicNoiseMode.KRISP -> {
+                val processor = noiseProcessorMutex.withLock {
+                    krispProcessor ?: withContext(Dispatchers.IO) {
+                        KrispAudioProcessor.getInstance(context.applicationContext).also { candidate ->
+                            check(candidate.init()) { "Krisp could not initialize on this device." }
+                        }
+                    }.also { krispProcessor = it }
+                }
+                controller.capturePostProcessor = processor
+                controller.bypassCapturePostProcessing = false
+            }
+
+            MicNoiseMode.DEEP_FILTER_NET -> {
+                val processor = noiseProcessorMutex.withLock {
+                    deepFilterNetProcessor?.takeIf { it.hasFailed }?.release()
+                    deepFilterNetProcessor?.takeUnless { it.hasFailed }
+                        ?: DeepFilterNetCaptureProcessor.create(context.applicationContext) { message ->
+                            scope.launch {
+                                while (room === currentRoom && mutableState.value.isConnecting) delay(100)
+                                if (room === currentRoom) {
+                                    currentRoom.audioProcessingController.bypassCapturePostProcessing = true
+                                    currentRoom.audioProcessingController.capturePostProcessor = null
+                                    mutableState.update {
+                                        it.copy(
+                                            noiseCancellationActive = false,
+                                            noiseCancellationMessage = message,
+                                        )
+                                    }
+                                }
+                            }
+                        }.also { deepFilterNetProcessor = it }
+                }
+                controller.capturePostProcessor = processor
+                controller.bypassCapturePostProcessing = false
+            }
+        }
+    }
+
+    private fun noiseCancellationUnavailableMessage(mode: MicNoiseMode, error: Throwable): String {
+        val detail = error.message?.takeIf(String::isNotBlank)
+        return if (detail == null) {
+            "${mode.title} couldn't start. Normal microphone processing is still on."
+        } else {
+            "${mode.title} couldn't start. Normal microphone processing is still on. $detail"
         }
     }
 
@@ -220,6 +354,10 @@ object VoiceSessionManager {
         localIdentity = ""
         participantVolumePercent.clear()
         runCatching { oldRoom?.disconnect() }
+        val oldDeepFilter = noiseProcessorMutex.withLock {
+            deepFilterNetProcessor.also { deepFilterNetProcessor = null }
+        }
+        runCatching { withContext(Dispatchers.IO) { oldDeepFilter?.release() } }
         mutableState.value = VoiceSessionState()
     }
 
@@ -240,6 +378,7 @@ object VoiceSessionManager {
                         name = localName,
                         isLocal = true,
                         isSpeaking = localIdentity in activeSpeakerIds,
+                        microphoneEnabled = local.isMicrophoneEnabled,
                     ),
                 )
             }
@@ -257,6 +396,7 @@ object VoiceSessionManager {
             name = name?.takeIf(String::isNotBlank) ?: participantIdentity,
             isLocal = false,
             isSpeaking = participantIdentity in speakers,
+            microphoneEnabled = isMicrophoneEnabled,
             volumePercent = participantVolumePercent[participantIdentity] ?: DEFAULT_REMOTE_VOLUME_PERCENT,
         )
     }

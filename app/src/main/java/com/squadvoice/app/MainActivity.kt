@@ -98,16 +98,19 @@ class MainActivity : ComponentActivity() {
         val preferences = getSharedPreferences("squadvoice", MODE_PRIVATE)
         val initialDarkMode = preferences.getBoolean("dark_mode", true)
         val initialAccentTheme = preferences.getString("accent_theme", "teal") ?: "teal"
+        val initialMicNoiseMode = MicNoiseMode.fromPreferences(preferences)
         applySystemBarTheme(initialDarkMode)
         setContent {
             var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
             var accentTheme by rememberSaveable {
                 mutableStateOf(preferences.getString("accent_theme", initialAccentTheme) ?: initialAccentTheme)
             }
+            var micNoiseMode by rememberSaveable { mutableStateOf(initialMicNoiseMode) }
             SquadVoiceTheme(darkMode, accentTheme) {
                 SquadVoiceApp(
                     darkMode = darkMode,
                     accentTheme = accentTheme,
+                    micNoiseMode = micNoiseMode,
                     onSetDarkMode = { selectedDarkMode ->
                         darkMode = selectedDarkMode
                         preferences.edit().putBoolean("dark_mode", darkMode).apply()
@@ -116,6 +119,14 @@ class MainActivity : ComponentActivity() {
                     onSelectAccentTheme = { selectedTheme ->
                         accentTheme = selectedTheme
                         preferences.edit().putString("accent_theme", selectedTheme).apply()
+                    },
+                    onSetMicNoiseMode = { selectedMode ->
+                        micNoiseMode = selectedMode
+                        preferences.edit()
+                            .putString(MIC_NOISE_MODE_PREFERENCE, selectedMode.preferenceValue)
+                            .putBoolean(LEGACY_NOISE_CANCELLATION_PREFERENCE, selectedMode != MicNoiseMode.NORMAL)
+                            .apply()
+                        VoiceSessionManager.setMicNoiseMode(this@MainActivity, selectedMode)
                     },
                 )
             }
@@ -246,8 +257,10 @@ private fun SquadVoiceTheme(
 private fun SquadVoiceApp(
     darkMode: Boolean,
     accentTheme: String,
+    micNoiseMode: MicNoiseMode,
     onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
+    onSetMicNoiseMode: (MicNoiseMode) -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("squadvoice", Context.MODE_PRIVATE) }
@@ -466,8 +479,14 @@ private fun SquadVoiceApp(
             SettingsScreen(
                 darkMode = darkMode,
                 accentTheme = accentTheme,
+                micNoiseMode = micNoiseMode,
+                noiseCancellationActive = session.noiseCancellationActive,
+                noiseCancellationMessage = session.noiseCancellationMessage,
+                voiceRoomConnected = session.isConnected,
+                voiceRoomConnecting = session.isConnecting,
                 onSetDarkMode = onSetDarkMode,
                 onSelectAccentTheme = onSelectAccentTheme,
+                onSetMicNoiseMode = onSetMicNoiseMode,
                 onBack = { showSettings = false },
             )
         } else if (isInRoom && activeRoom != null) {
@@ -693,13 +712,21 @@ private fun HomeScreen(
 private fun SettingsScreen(
     darkMode: Boolean,
     accentTheme: String,
+    micNoiseMode: MicNoiseMode,
+    noiseCancellationActive: Boolean,
+    noiseCancellationMessage: String?,
+    voiceRoomConnected: Boolean,
+    voiceRoomConnecting: Boolean,
     onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
+    onSetMicNoiseMode: (MicNoiseMode) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var showAppearancePicker by rememberSaveable { mutableStateOf(false) }
+    var showMicNoisePicker by rememberSaveable { mutableStateOf(false) }
+    var showAuthorDetails by rememberSaveable { mutableStateOf(false) }
     var isCheckingForUpdates by remember { mutableStateOf(false) }
     var updateMessage by remember { mutableStateOf<String?>(null) }
     var availableVersion by remember { mutableStateOf<String?>(null) }
@@ -819,6 +846,91 @@ private fun SettingsScreen(
             )
         }
 
+        val selectedMicNoiseMode = MicNoiseMode.entries.firstOrNull { it == micNoiseMode } ?: MicNoiseMode.NORMAL
+        Text("VOICE AUDIO", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Panel)
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Microphone noise filter", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(selectedMicNoiseMode.title, color = MutedText, fontSize = 12.sp)
+            }
+            OutlinedButton(onClick = { showMicNoisePicker = true }) {
+                Text("Choose")
+            }
+        }
+
+        if (showMicNoisePicker) {
+            AlertDialog(
+                onDismissRequest = { showMicNoisePicker = false },
+                title = { Text("Choose microphone filter", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 460.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            "Choose how much background sound to remove from your microphone. This affects your mic only.",
+                            color = MutedText,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
+                        MicNoiseMode.entries.forEach { mode ->
+                            val selected = micNoiseMode == mode
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(13.dp))
+                                    .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Panel)
+                                    .clickable { onSetMicNoiseMode(mode) }
+                                    .semantics {
+                                        role = Role.RadioButton
+                                        contentDescription = "${mode.title}${if (selected) ", selected" else ""}"
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(mode.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(mode.description, color = MutedText, fontSize = 11.sp, lineHeight = 15.sp)
+                                }
+                                if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showMicNoisePicker = false }) { Text("Done") }
+                },
+            )
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val noiseStatus = when {
+                noiseCancellationMessage != null -> noiseCancellationMessage
+                micNoiseMode == MicNoiseMode.NORMAL -> "Normal mode is selected."
+                noiseCancellationActive -> "${micNoiseMode.title} is active on this microphone."
+                voiceRoomConnecting -> "Preparing ${micNoiseMode.title} for your microphone…"
+                voiceRoomConnected -> "Applying ${micNoiseMode.title} to your microphone…"
+                else -> "${micNoiseMode.title} will be applied when you join a room."
+            }
+            Text(
+                noiseStatus,
+                color = if (noiseCancellationMessage != null) MaterialTheme.colorScheme.error else MutedText,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -913,57 +1025,80 @@ private fun SettingsScreen(
             }
         }
 
-        SectionCard(
-            kicker = "ABOUT THE AUTHOR",
-            title = "Alok Kumar",
-            detail = "B.Tech IT · 2028",
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Panel)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ContactDetailRow(
-                icon = R.drawable.ic_email,
-                description = "Send email",
-                value = "alokcu2k24@gmail.com",
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:alokcu2k24@gmail.com")))
-                    }
-                },
-            )
-            ContactDetailRow(
-                icon = R.drawable.ic_phone,
-                description = "Call Alok",
-                value = "+91-6206475411",
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:+916206475411")))
-                    }
-                },
-            )
-            ContactDetailRow(
-                icon = R.drawable.ic_location,
-                description = "Open location in maps",
-                value = "Gaya, Bihar",
-                onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Gaya,Bihar")))
-                    }
-                },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ProfileLinkIcon(
-                    icon = R.drawable.ic_linkedin,
-                    description = "Open LinkedIn profile",
-                    onClick = { openExternalLink(context, "https://www.linkedin.com/in/alok-kumar-a1404x") },
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "About the author",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                ProfileLinkIcon(
-                    icon = R.drawable.ic_github,
-                    description = "Open GitHub profile",
-                    onClick = { openExternalLink(context, "https://github.com/alok4041") },
+                OutlinedButton(
+                    onClick = { showAuthorDetails = !showAuthorDetails },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (showAuthorDetails) "Hide author details" else "Show author details"
+                    },
+                ) {
+                    Text(if (showAuthorDetails) "⌃" else "⌄", fontSize = 20.sp, lineHeight = 20.sp)
+                }
+            }
+            if (showAuthorDetails) {
+                Text("Alok Kumar", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text("B.Tech IT · 2028", color = MutedText, fontSize = 12.sp)
+                ContactDetailRow(
+                    icon = R.drawable.ic_email,
+                    description = "Send email",
+                    value = "alokcu2k24@gmail.com",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:alokcu2k24@gmail.com")))
+                        }
+                    },
                 )
-                ProfileLinkIcon(
-                    icon = R.drawable.ic_instagram,
-                    description = "Open Instagram profile",
-                    onClick = { openExternalLink(context, "https://www.instagram.com/n_alok4041/") },
+                ContactDetailRow(
+                    icon = R.drawable.ic_phone,
+                    description = "Call Alok",
+                    value = "+91-6206475411",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:+916206475411")))
+                        }
+                    },
                 )
+                ContactDetailRow(
+                    icon = R.drawable.ic_location,
+                    description = "Open location in maps",
+                    value = "Gaya, Bihar",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Gaya,Bihar")))
+                        }
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ProfileLinkIcon(
+                        icon = R.drawable.ic_linkedin,
+                        description = "Open LinkedIn profile",
+                        onClick = { openExternalLink(context, "https://www.linkedin.com/in/alok-kumar-a1404x") },
+                    )
+                    ProfileLinkIcon(
+                        icon = R.drawable.ic_github,
+                        description = "Open GitHub profile",
+                        onClick = { openExternalLink(context, "https://github.com/alok4041") },
+                    )
+                    ProfileLinkIcon(
+                        icon = R.drawable.ic_instagram,
+                        description = "Open Instagram profile",
+                        onClick = { openExternalLink(context, "https://www.instagram.com/n_alok4041/") },
+                    )
+                }
             }
         }
 
@@ -1322,7 +1457,34 @@ private fun ParticipantRow(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(if (participant.isSpeaking) "Speaking" else "In the room", fontSize = 11.sp, color = if (participant.isSpeaking) Mint else MutedText)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = if (participant.microphoneEnabled) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer
+                        },
+                        shape = RoundedCornerShape(7.dp),
+                    ) {
+                        Text(
+                            if (participant.microphoneEnabled) "Mic on" else "Mic muted",
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                            color = if (participant.microphoneEnabled) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        if (participant.isSpeaking) "Speaking" else "In the room",
+                        fontSize = 11.sp,
+                        color = if (participant.isSpeaking) Mint else MutedText,
+                    )
+                }
             }
             if (participant.isLocal) {
                 if (participant.isSpeaking) Box(Modifier.size(8.dp).clip(CircleShape).background(Mint))

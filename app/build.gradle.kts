@@ -15,9 +15,15 @@ android {
         applicationId = "com.squadvoice.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.1.8"
+        versionCode = 11
+        versionName = "1.1.9"
         buildConfigField("String", "TOKEN_SERVER_URL", "\"$tokenServerUrl\"")
+
+        // The shared APK is for Android phones; excluding desktop emulator ABIs
+        // avoids bundling their large DeepFilterNet native libraries.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -55,6 +61,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("io.livekit:livekit-android:2.29.0")
+    implementation("io.livekit:krisp-noise-filter:0.0.15")
+    implementation("io.github.kaleyravideo:android-deepfilternet:0.0.8")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
