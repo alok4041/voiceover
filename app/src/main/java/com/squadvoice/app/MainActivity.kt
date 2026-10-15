@@ -830,54 +830,63 @@ private fun SettingsScreen(
             Text("APP UPDATES", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
             Text("Check for updates", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text("Installed version: v${BuildConfig.VERSION_NAME}", color = MutedText, fontSize = 12.sp)
-            Text(
-                "Check GitHub for the newest SquadVoice APK. Android will ask before installing it.",
-                color = MutedText,
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-            )
-            Button(
-                onClick = {
-                    isCheckingForUpdates = true
-                    updateMessage = null
-                    availableVersion = null
-                    availableApkUrl = null
-                    coroutineScope.launch {
-                        try {
-                            val latest = withContext(Dispatchers.IO) { AppUpdateChecker.fetchLatestApk() }
-                            val comparison = compareVersions(latest.version, BuildConfig.VERSION_NAME)
-                            when {
-                                comparison > 0 -> {
-                                    availableVersion = latest.version
-                                    availableApkUrl = latest.downloadUrl
-                                    updateMessage = "Version ${latest.version} is available. You have v${BuildConfig.VERSION_NAME}."
-                                }
-                                comparison == 0 -> {
-                                    updateMessage = "You're using the latest version (v${BuildConfig.VERSION_NAME})."
-                                }
-                                else -> {
-                                    updateMessage = "This installed build (v${BuildConfig.VERSION_NAME}) is newer than the latest public release (v${latest.version})."
-                                }
-                            }
-                        } catch (_: Exception) {
-                            updateMessage = "Couldn't check for updates. Check your internet connection and try again."
-                        } finally {
-                            isCheckingForUpdates = false
-                        }
-                    }
-                },
-                enabled = !isCheckingForUpdates,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (isCheckingForUpdates) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Spacer(Modifier.width(9.dp))
-                    Text("Checking…")
-                } else {
-                    Text("Check for updates")
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        isCheckingForUpdates = true
+                        updateMessage = null
+                        availableVersion = null
+                        availableApkUrl = null
+                        coroutineScope.launch {
+                            try {
+                                val latest = withContext(Dispatchers.IO) { AppUpdateChecker.fetchLatestApk() }
+                                val comparison = compareVersions(latest.version, BuildConfig.VERSION_NAME)
+                                when {
+                                    comparison > 0 -> {
+                                        availableVersion = latest.version
+                                        availableApkUrl = latest.downloadUrl
+                                        updateMessage = "Version ${latest.version} is available. You have v${BuildConfig.VERSION_NAME}."
+                                    }
+                                    comparison == 0 -> {
+                                        updateMessage = "You're using the latest version (v${BuildConfig.VERSION_NAME})."
+                                    }
+                                    else -> {
+                                        updateMessage = "This installed build (v${BuildConfig.VERSION_NAME}) is newer than the latest public release (v${latest.version})."
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                updateMessage = "Couldn't check for updates. Check your internet connection and try again."
+                            } finally {
+                                isCheckingForUpdates = false
+                            }
+                        }
+                    },
+                    enabled = !isCheckingForUpdates,
+                ) {
+                    if (isCheckingForUpdates) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text("Checking…", maxLines = 1)
+                    } else {
+                        Text("Check updates", maxLines = 1)
+                    }
+                }
+                OutlinedButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = "Open SquadVoice website" },
+                    onClick = { openExternalLink(context, "https://alok4041.github.io/voiceover/") },
+                ) {
+                    Text("Website", maxLines = 1)
                 }
             }
             updateMessage?.let { message ->
@@ -907,7 +916,7 @@ private fun SettingsScreen(
         SectionCard(
             kicker = "ABOUT THE AUTHOR",
             title = "Alok Kumar",
-            detail = "B.Tech IT · Chandigarh University · 2028",
+            detail = "B.Tech IT · 2028",
         ) {
             ContactDetailRow(
                 icon = R.drawable.ic_email,
