@@ -183,33 +183,54 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pendingRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var overlayEnabled by rememberSaveable {
-        mutableStateOf(OverlayControlsService.isRunning || (isSessionActive && preferences.getBoolean("overlay_enabled", false) && Settings.canDrawOverlays(context)))
-    }
+    var overlayEnabled by remember { mutableStateOf(OverlayControlsService.isRunning) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        val active = VoiceSessionManager.state.value.isConnected || VoiceSessionManager.state.value.isConnecting
-        if (active) {
-            val code = preferences.getString("room_code", null)
-            val name = preferences.getString("room_name", null)
-            val url = preferences.getString("server_url", null)
-            val token = preferences.getString("participant_token", null)
-            if (!code.isNullOrBlank() && !name.isNullOrBlank() && !url.isNullOrBlank() && !token.isNullOrBlank()) {
-                savedRoomCode = code
-                savedRoomName = name
-                savedServerUrl = url
-                savedParticipantToken = token
-                isInRoom = true
-                overlayEnabled = OverlayControlsService.isRunning || (preferences.getBoolean("overlay_enabled", false) && Settings.canDrawOverlays(context))
+    LaunchedEffect(session.isConnected, session.isConnecting) {
+        val isSessionAlive = session.isConnected || session.isConnecting
+        if (isSessionAlive) {
+            if (!isInRoom) {
+                val code = preferences.getString("room_code", null)
+                val name = preferences.getString("room_name", null)
+                val url = preferences.getString("server_url", null)
+                val token = preferences.getString("participant_token", null)
+                if (!code.isNullOrBlank() && !name.isNullOrBlank() && !url.isNullOrBlank() && !token.isNullOrBlank()) {
+                    savedRoomCode = code
+                    savedRoomName = name
+                    savedServerUrl = url
+                    savedParticipantToken = token
+                    isInRoom = true
+                }
             }
-        } else if (!isLoading) {
+            val desiredOverlay = preferences.getBoolean("overlay_enabled", false)
+            if (desiredOverlay) {
+                if (Settings.canDrawOverlays(context)) {
+                    if (!OverlayControlsService.isRunning) {
+                        OverlayControlsService.start(context)
+                        overlayEnabled = true
+                    }
+                } else {
+                    preferences.edit().putBoolean("overlay_enabled", false).apply()
+                    overlayEnabled = false
+                }
+            } else {
+                overlayEnabled = OverlayControlsService.isRunning
+            }
+        } else if (!isLoading && isInRoom) {
+            OverlayControlsService.stop(context)
             savedRoomCode = null
             savedRoomName = null
             savedServerUrl = null
             savedParticipantToken = null
             isInRoom = false
             overlayEnabled = false
+            preferences.edit()
+                .remove("room_code")
+                .remove("room_name")
+                .remove("server_url")
+                .remove("participant_token")
+                .remove("overlay_enabled")
+                .apply()
         }
     }
 
@@ -247,6 +268,8 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
             preferences.edit().putBoolean("overlay_enabled", true).apply()
             errorMessage = null
         } else {
+            overlayEnabled = false
+            preferences.edit().putBoolean("overlay_enabled", false).apply()
             errorMessage = "Overlay permission was not enabled. You can still use the in-app controls."
         }
     }
@@ -334,7 +357,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 onCopyCode = { copyRoomCode(context, activeRoom.code) },
                 onShareCode = { shareRoomCode(context, activeRoom.code) },
                 onToggleOverlay = {
-                    if (overlayEnabled) {
+                    if (OverlayControlsService.isRunning) {
                         OverlayControlsService.stop(context)
                         overlayEnabled = false
                         preferences.edit().putBoolean("overlay_enabled", false).apply()
