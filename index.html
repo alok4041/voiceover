@@ -180,16 +180,6 @@
             </article>
             <article class="release-card">
               <div class="release-info">
-                <h3 class="release-title"><span class="release-tag">v1.1.0</span></h3>
-                <p class="release-meta">Android APK · about 66 MB</p>
-              </div>
-              <div class="release-actions">
-                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.0/app-debug.apk">Download APK</a>
-                <a class="release-notes" href="https://github.com/alok4041/voiceover/releases/tag/v1.1.0" target="_blank" rel="noopener noreferrer">Release details</a>
-              </div>
-            </article>
-            <article class="release-card">
-              <div class="release-info">
                 <h3 class="release-title"><span class="release-tag">v1.0.0</span></h3>
                 <p class="release-meta">Android APK · about 65 MB</p>
               </div>
@@ -199,7 +189,7 @@
               </div>
             </article>
           </div>
-          <p class="release-status" id="release-status" role="status">Showing published versions with an Android APK.</p>
+          <p class="release-status" id="release-status" role="status">Showing 2 available versions with an Android APK.</p>
         </section>
 
         <section class="features" aria-label="App features">
@@ -239,6 +229,7 @@
         const releaseList = document.getElementById('release-list');
         const releaseStatus = document.getElementById('release-status');
         const releasesUrl = 'https://api.github.com/repos/alok4041/voiceover/releases?per_page=100';
+        const hiddenReleaseTags = new Set(['v1.1.0']);
 
         function formatSize(bytes) {
           if (!Number.isFinite(bytes) || bytes <= 0) return 'APK';
@@ -296,7 +287,7 @@
           })
           .then((releases) => {
             const publishedApks = releases
-              .filter((release) => !release.draft)
+              .filter((release) => !release.draft && !hiddenReleaseTags.has(release.tag_name))
               .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name.toLowerCase().endsWith('.apk')) }))
               .filter(({ apk }) => apk);
 
