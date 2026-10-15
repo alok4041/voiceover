@@ -4,7 +4,7 @@ plugins {
 }
 
 val tokenServerUrl = providers.gradleProperty("TOKEN_SERVER_URL")
-    .orElse("http://10.0.2.2:3000")
+    .orElse("https://squadvoice-api-alok1404-251015-0109.onrender.com")
     .get()
 
 android {
