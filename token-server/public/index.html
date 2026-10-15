@@ -167,7 +167,7 @@
           <div class="versions-heading">
             <div>
               <h2 id="versions-title">APK versions</h2>
-              <p>Choose a version to install. The newest release is marked for you.</p>
+              <p>Choose from the two newest APK releases. The latest release is marked for you.</p>
             </div>
           </div>
           <div class="release-list" id="release-list" aria-live="polite">
@@ -190,16 +190,6 @@
                 <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.8/app-debug.apk">Download APK</a>
               </div>
               <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.8 refreshes the home screen and Settings experience.</p></details>
-            </article>
-            <article class="release-card">
-              <div class="release-info">
-                <h3 class="release-title"><span class="release-tag">v1.1.7</span><span class="release-badge">Stable</span></h3>
-                <p class="release-meta">Android APK · about 65 MB · SquadVoice 1.1.7</p>
-              </div>
-              <div class="release-actions">
-                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.7/app-debug.apk">Download APK</a>
-              </div>
-              <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.7 adds an in-app update checker in Settings.</p></details>
             </article>
           </div>
           <p class="release-status" id="release-status" role="status">Loading published Android APK versions…</p>
@@ -315,16 +305,18 @@
             const publishedApks = releases
               .filter((release) => !release.draft && !hiddenReleaseTags.has(release.tag_name))
               .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name?.toLowerCase().endsWith('.apk')) }))
-              .filter(({ apk }) => apk);
+              .filter(({ apk }) => apk)
+              .sort((a, b) => Date.parse(b.release.published_at || b.release.created_at) - Date.parse(a.release.published_at || a.release.created_at));
 
             if (publishedApks.length === 0) {
               releaseStatus.textContent = 'No APK releases are published yet. Check GitHub Releases for updates.';
               return;
             }
 
-            const latestStableIndex = publishedApks.findIndex(({ release }) => !release.prerelease);
-            releaseList.replaceChildren(...publishedApks.map(({ release, apk }, index) => makeReleaseCard(release, latestStableIndex, apk, index)));
-            releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
+            const latestApks = publishedApks.slice(0, 2);
+            const latestStableIndex = latestApks.findIndex(({ release }) => !release.prerelease);
+            releaseList.replaceChildren(...latestApks.map(({ release, apk }, index) => makeReleaseCard(release, latestStableIndex, apk, index)));
+            releaseStatus.textContent = `Showing the ${latestApks.length} latest published APK version${latestApks.length === 1 ? '' : 's'}.`;
           })
           .catch(() => {
             releaseStatus.textContent = 'Could not load the full release list. Showing saved versions; check back later.';
