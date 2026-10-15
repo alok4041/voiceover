@@ -57,6 +57,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
@@ -80,7 +81,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -692,6 +695,13 @@ private fun SettingsScreen(
     onSelectAccentTheme: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isCheckingForUpdates by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf<String?>(null) }
+    var availableVersion by remember { mutableStateOf<String?>(null) }
+    var availableApkUrl by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -724,6 +734,91 @@ private fun SettingsScreen(
                 Text("Switch between light and dark appearance", color = MutedText, fontSize = 11.sp)
             }
             Switch(checked = darkMode, onCheckedChange = { onToggleTheme() })
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Panel)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Text("APP UPDATES", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+            Text("Check for updates", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text("Installed version: v${BuildConfig.VERSION_NAME}", color = MutedText, fontSize = 12.sp)
+            Text(
+                "Check GitHub for the newest SquadVoice APK. Android will ask before installing it.",
+                color = MutedText,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            Button(
+                onClick = {
+                    isCheckingForUpdates = true
+                    updateMessage = null
+                    availableVersion = null
+                    availableApkUrl = null
+                    coroutineScope.launch {
+                        try {
+                            val latest = withContext(Dispatchers.IO) { AppUpdateChecker.fetchLatestApk() }
+                            val comparison = compareVersions(latest.version, BuildConfig.VERSION_NAME)
+                            when {
+                                comparison > 0 -> {
+                                    availableVersion = latest.version
+                                    availableApkUrl = latest.downloadUrl
+                                    updateMessage = "Version ${latest.version} is available. You have v${BuildConfig.VERSION_NAME}."
+                                }
+                                comparison == 0 -> {
+                                    updateMessage = "You're using the latest version (v${BuildConfig.VERSION_NAME})."
+                                }
+                                else -> {
+                                    updateMessage = "This installed build (v${BuildConfig.VERSION_NAME}) is newer than the latest public release (v${latest.version})."
+                                }
+                            }
+                        } catch (_: Exception) {
+                            updateMessage = "Couldn't check for updates. Check your internet connection and try again."
+                        } finally {
+                            isCheckingForUpdates = false
+                        }
+                    }
+                },
+                enabled = !isCheckingForUpdates,
+            ) {
+                if (isCheckingForUpdates) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text("Checking…")
+                } else {
+                    Text("Check for updates")
+                }
+            }
+            updateMessage?.let { message ->
+                Text(
+                    message,
+                    color = if (availableApkUrl != null) MaterialTheme.colorScheme.primary else MutedText,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
+            }
+            availableApkUrl?.let { downloadUrl ->
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)))
+                        }.onFailure {
+                            updateMessage = "Couldn't open a browser to download the update."
+                            availableApkUrl = null
+                        }
+                    },
+                ) {
+                    Text("Download v${availableVersion.orEmpty()} APK")
+                }
+            }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -791,6 +886,16 @@ private fun SettingsScreen(
             modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp),
         )
     }
+}
+
+private fun compareVersions(left: String, right: String): Int {
+    val leftParts = left.removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+    val rightParts = right.removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+    for (index in 0 until maxOf(leftParts.size, rightParts.size)) {
+        val comparison = (leftParts.getOrElse(index) { 0 }).compareTo(rightParts.getOrElse(index) { 0 })
+        if (comparison != 0) return comparison
+    }
+    return 0
 }
 
 @Composable
