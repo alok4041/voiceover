@@ -15,8 +15,8 @@ android {
         applicationId = "com.squadvoice.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.1.7"
+        versionCode = 10
+        versionName = "1.1.8"
         buildConfigField("String", "TOKEN_SERVER_URL", "\"$tokenServerUrl\"")
     }
 

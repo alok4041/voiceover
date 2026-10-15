@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -43,12 +44,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -67,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -102,8 +108,8 @@ class MainActivity : ComponentActivity() {
                 SquadVoiceApp(
                     darkMode = darkMode,
                     accentTheme = accentTheme,
-                    onToggleTheme = {
-                        darkMode = !darkMode
+                    onSetDarkMode = { selectedDarkMode ->
+                        darkMode = selectedDarkMode
                         preferences.edit().putBoolean("dark_mode", darkMode).apply()
                         applySystemBarTheme(darkMode)
                     },
@@ -240,7 +246,7 @@ private fun SquadVoiceTheme(
 private fun SquadVoiceApp(
     darkMode: Boolean,
     accentTheme: String,
-    onToggleTheme: () -> Unit,
+    onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -460,7 +466,7 @@ private fun SquadVoiceApp(
             SettingsScreen(
                 darkMode = darkMode,
                 accentTheme = accentTheme,
-                onToggleTheme = onToggleTheme,
+                onSetDarkMode = onSetDarkMode,
                 onSelectAccentTheme = onSelectAccentTheme,
                 onBack = { showSettings = false },
             )
@@ -478,8 +484,6 @@ private fun SquadVoiceApp(
                 },
                 pushToTalk = pushToTalk,
                 overlayEnabled = overlayEnabled,
-                darkMode = darkMode,
-                onToggleTheme = onToggleTheme,
                 onOpenSettings = { showSettings = true },
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
@@ -536,8 +540,6 @@ private fun SquadVoiceApp(
                 joinCode = joinCode,
                 isLoading = isLoading,
                 errorMessage = errorMessage,
-                darkMode = darkMode,
-                onToggleTheme = onToggleTheme,
                 onOpenSettings = { showSettings = true },
                 onPlayerNameChange = {
                     playerName = it
@@ -575,8 +577,6 @@ private fun HomeScreen(
     joinCode: String,
     isLoading: Boolean,
     errorMessage: String?,
-    darkMode: Boolean,
-    onToggleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
     onPlayerNameChange: (String) -> Unit,
     onRoomNameChange: (String) -> Unit,
@@ -594,12 +594,17 @@ private fun HomeScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Mint),
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(RaisedPanel),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("S", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                Icon(
+                    painter = painterResource(R.drawable.ic_mic),
+                    contentDescription = null,
+                    tint = Mint,
+                    modifier = Modifier.size(25.dp),
+                )
             }
             Spacer(Modifier.width(11.dp))
             Column {
@@ -607,13 +612,10 @@ private fun HomeScreen(
                 Text("VOICE FOR YOUR SQUAD", fontSize = 9.sp, color = MutedText, letterSpacing = 1.4.sp)
             }
             Spacer(Modifier.weight(1f))
-            TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
             TextButtonLabel("⚙", onOpenSettings, accessibilityLabel = "Open settings")
         }
 
-        Spacer(Modifier.height(3.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("YOUR GAME.\nYOUR PEOPLE.", fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.ExtraBold)
             Text(
                 "Quick voice rooms for your squad. Keep the game open while you talk.",
                 color = MutedText,
@@ -691,12 +693,13 @@ private fun HomeScreen(
 private fun SettingsScreen(
     darkMode: Boolean,
     accentTheme: String,
-    onToggleTheme: () -> Unit,
+    onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    var showAppearancePicker by rememberSaveable { mutableStateOf(false) }
     var isCheckingForUpdates by remember { mutableStateOf(false) }
     var updateMessage by remember { mutableStateOf<String?>(null) }
     var availableVersion by remember { mutableStateOf<String?>(null) }
@@ -721,19 +724,99 @@ private fun SettingsScreen(
             Text("Choose how SquadVoice looks on this phone.", color = MutedText, fontSize = 13.sp)
         }
 
+        val selectedPalette = accentPalettes.firstOrNull { it.id == accentTheme } ?: accentPalettes.first()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(20.dp))
                 .background(Panel)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(if (darkMode) "Night mode" else "Day mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text("Switch between light and dark appearance", color = MutedText, fontSize = 11.sp)
+                Text("Current theme", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("${if (darkMode) "Night" else "Day"} · ${selectedPalette.name}", color = MutedText, fontSize = 12.sp)
             }
-            Switch(checked = darkMode, onCheckedChange = { onToggleTheme() })
+            OutlinedButton(onClick = { showAppearancePicker = true }) {
+                Text("Choose")
+            }
+        }
+
+        if (showAppearancePicker) {
+            AlertDialog(
+                onDismissRequest = { showAppearancePicker = false },
+                title = { Text("Choose your theme", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 460.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("MODE", fontSize = 10.sp, color = MutedText, letterSpacing = 1.3.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(true to "Night", false to "Day").forEach { (isDark, label) ->
+                                val isSelected = darkMode == isDark
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Panel)
+                                        .clickable { onSetDarkMode(isDark) }
+                                        .semantics {
+                                            role = Role.RadioButton
+                                            contentDescription = "$label${if (isSelected) ", selected" else ""}"
+                                        }
+                                        .padding(vertical = 13.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                        Icon(
+                                            painter = painterResource(if (isDark) R.drawable.ic_night else R.drawable.ic_day),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(17.dp),
+                                        )
+                                        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(3.dp))
+                        Text("ACCENT COLOR", fontSize = 10.sp, color = MutedText, letterSpacing = 1.3.sp, fontWeight = FontWeight.Bold)
+                        accentPalettes.forEach { palette ->
+                            val isSelected = palette.id == accentTheme
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(13.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Panel)
+                                    .clickable { onSelectAccentTheme(palette.id) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .semantics {
+                                        role = Role.RadioButton
+                                        contentDescription = "${palette.name}${if (isSelected) ", selected" else ""}"
+                                    },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(23.dp)
+                                        .clip(CircleShape)
+                                        .background(palette.swatch)
+                                        .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), CircleShape),
+                                )
+                                Spacer(Modifier.width(11.dp))
+                                Text(palette.name, modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                if (isSelected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showAppearancePicker = false }) { Text("Done") }
+                },
+            )
         }
 
         Column(
@@ -821,61 +904,57 @@ private fun SettingsScreen(
             }
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("COLOR THEMES", fontSize = 11.sp, color = MutedText, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-            Text("Pick an accent color", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Your choice is saved on this device and used in both day and night mode.", color = MutedText, fontSize = 12.sp, lineHeight = 17.sp)
-            accentPalettes.forEach { palette ->
-                val isSelected = palette.id == accentTheme
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Panel)
-                        .clickable { onSelectAccentTheme(palette.id) }
-                        .padding(horizontal = 15.dp, vertical = 13.dp)
-                        .semantics {
-                            role = Role.RadioButton
-                            contentDescription = "${palette.name}${if (isSelected) ", selected" else ""}"
-                        },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(palette.swatch)
-                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f), CircleShape),
-                    )
-                    Spacer(Modifier.width(13.dp))
-                    Text(palette.name, modifier = Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    if (isSelected) {
-                        Text("✓ Selected", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
         SectionCard(
-            kicker = "ABOUT",
-            title = "About the author",
-            detail = "SquadVoice was created for gaming teams who want to talk while keeping game audio on their device.",
+            kicker = "ABOUT THE AUTHOR",
+            title = "Alok Kumar",
+            detail = "B.Tech IT · Chandigarh University · 2028",
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(CircleShape)
-                        .background(Mint),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("A", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text("Alok Kumar", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("Creator of SquadVoice", color = MutedText, fontSize = 12.sp)
-                }
+            ContactDetailRow(
+                icon = R.drawable.ic_email,
+                description = "Send email",
+                value = "alokcu2k24@gmail.com",
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:alokcu2k24@gmail.com")))
+                    }
+                },
+            )
+            ContactDetailRow(
+                icon = R.drawable.ic_phone,
+                description = "Call Alok",
+                value = "+91-6206475411",
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:+916206475411")))
+                    }
+                },
+            )
+            ContactDetailRow(
+                icon = R.drawable.ic_location,
+                description = "Open location in maps",
+                value = "Gaya, Bihar",
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Gaya,Bihar")))
+                    }
+                },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ProfileLinkIcon(
+                    icon = R.drawable.ic_linkedin,
+                    description = "Open LinkedIn profile",
+                    onClick = { openExternalLink(context, "https://www.linkedin.com/in/alok-kumar-a1404x") },
+                )
+                ProfileLinkIcon(
+                    icon = R.drawable.ic_github,
+                    description = "Open GitHub profile",
+                    onClick = { openExternalLink(context, "https://github.com/alok4041") },
+                )
+                ProfileLinkIcon(
+                    icon = R.drawable.ic_instagram,
+                    description = "Open Instagram profile",
+                    onClick = { openExternalLink(context, "https://www.instagram.com/n_alok4041/") },
+                )
             }
         }
 
@@ -899,6 +978,67 @@ private fun compareVersions(left: String, right: String): Int {
 }
 
 @Composable
+private fun ContactDetailRow(
+    icon: Int,
+    description: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(13.dp))
+            .clickable(onClick = onClick)
+            .semantics {
+                role = Role.Button
+                contentDescription = "$description: $value"
+            }
+            .padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = null,
+            tint = Mint,
+            modifier = Modifier.size(19.dp),
+        )
+        Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun ProfileLinkIcon(
+    icon: Int,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(RaisedPanel)
+            .clickable(onClick = onClick)
+            .semantics {
+                role = Role.Button
+                contentDescription = description
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = null,
+            tint = Mint,
+            modifier = Modifier.size(21.dp),
+        )
+    }
+}
+
+private fun openExternalLink(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+}
+
+@Composable
 private fun RoomScreen(
     room: RoomCredentials,
     session: VoiceSessionState,
@@ -906,8 +1046,6 @@ private fun RoomScreen(
     onReconnect: () -> Unit,
     pushToTalk: Boolean,
     overlayEnabled: Boolean,
-    darkMode: Boolean,
-    onToggleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
@@ -933,7 +1071,6 @@ private fun RoomScreen(
                 Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.weight(1f))
-            TextButtonLabel(if (darkMode) "☀ Day" else "☾ Night", onToggleTheme)
             TextButtonLabel("⚙", onOpenSettings, accessibilityLabel = "Open settings")
             Button(
                 onClick = onLeave,
