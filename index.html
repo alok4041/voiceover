@@ -251,7 +251,7 @@
       (() => {
         const releaseList = document.getElementById('release-list');
         const releaseStatus = document.getElementById('release-status');
-        const releasesUrl = 'https://api.github.com/repos/alok4041/voiceover/releases?per_page=100';
+        const releasesUrl = `https://api.github.com/repos/alok4041/voiceover/releases?per_page=100&_=${Date.now()}`;
         const hiddenReleaseTags = new Set(['v1.1.0']);
 
         function formatSize(bytes) {
@@ -306,12 +306,7 @@
           return card;
         }
 
-        fetch(releasesUrl, {
-          cache: 'no-store',
-          headers: {
-            Accept: 'application/vnd.github+json',
-          },
-        })
+        fetch(releasesUrl)
           .then((response) => {
             if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
             return response.json();
