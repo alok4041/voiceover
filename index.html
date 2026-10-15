@@ -173,13 +173,23 @@
           <div class="release-list" id="release-list" aria-live="polite">
             <article class="release-card">
               <div class="release-info">
-                <h3 class="release-title"><span class="release-tag">v1.1.8</span><span class="release-badge">Latest</span></h3>
+                <h3 class="release-title"><span class="release-tag">v1.1.9</span><span class="release-badge">Latest</span></h3>
+                <p class="release-meta">Android APK · about 72 MB · SquadVoice 1.1.9</p>
+              </div>
+              <div class="release-actions">
+                <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.9/app-debug.apk">Download APK</a>
+              </div>
+              <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.9 adds selectable microphone noise filtering options.</p></details>
+            </article>
+            <article class="release-card">
+              <div class="release-info">
+                <h3 class="release-title"><span class="release-tag">v1.1.8</span><span class="release-badge">Stable</span></h3>
                 <p class="release-meta">Android APK · about 65 MB · SquadVoice 1.1.8</p>
               </div>
               <div class="release-actions">
                 <a class="release-download" href="https://github.com/alok4041/voiceover/releases/download/v1.1.8/app-debug.apk">Download APK</a>
               </div>
-              <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.8 refreshes the home screen, combines appearance choices in one picker, adds a website shortcut beside the update checker, and cleans up the About profile with icon-only social links and contact details.</p></details>
+              <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.8 refreshes the home screen and Settings experience.</p></details>
             </article>
             <article class="release-card">
               <div class="release-info">
@@ -192,7 +202,7 @@
               <details class="release-details"><summary>Release details</summary><p class="release-body">SquadVoice 1.1.7 adds an in-app update checker in Settings.</p></details>
             </article>
           </div>
-          <p class="release-status" id="release-status" role="status">Showing 2 available versions with an Android APK.</p>
+          <p class="release-status" id="release-status" role="status">Loading published Android APK versions…</p>
         </section>
 
         <section class="features" aria-label="App features">
@@ -310,17 +320,11 @@
           .then((releases) => {
             const publishedApks = releases
               .filter((release) => !release.draft && !hiddenReleaseTags.has(release.tag_name))
-              .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name.toLowerCase().endsWith('.apk')) }))
+              .map((release) => ({ release, apk: release.assets?.find((asset) => asset.name?.toLowerCase().endsWith('.apk')) }))
               .filter(({ apk }) => apk);
 
             if (publishedApks.length === 0) {
               releaseStatus.textContent = 'No APK releases are published yet. Check GitHub Releases for updates.';
-              return;
-            }
-
-            const savedLatestTag = releaseList.querySelector('.release-tag')?.textContent.trim();
-            if (savedLatestTag && !publishedApks.some(({ release }) => release.tag_name === savedLatestTag)) {
-              releaseStatus.textContent = 'Showing the saved versions while GitHub release data refreshes.';
               return;
             }
 
@@ -329,7 +333,7 @@
             releaseStatus.textContent = `Showing ${publishedApks.length} published version${publishedApks.length === 1 ? '' : 's'} with an Android APK.`;
           })
           .catch(() => {
-            releaseStatus.textContent = 'Showing the saved version list. Check back later for newer builds.';
+            releaseStatus.textContent = 'Could not load the full release list. Showing saved versions; check back later.';
           });
       })();
     </script>
