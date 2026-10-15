@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -165,7 +166,6 @@ private fun SquadVoiceTheme(darkMode: Boolean, content: @Composable () -> Unit) 
 @Composable
 private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     val context = LocalContext.current
-    val activity = context as ComponentActivity
     val preferences = remember { context.getSharedPreferences("squadvoice", Context.MODE_PRIVATE) }
     val api = remember { RoomApi() }
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -201,6 +201,23 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     var pendingRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var overlayEnabled by remember { mutableStateOf(OverlayControlsService.isRunning) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
+
+    DisposableEffect(preferences) {
+        val roomPreferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            if (key == "room_code" && prefs.getString("room_code", null).isNullOrBlank()) {
+                savedRoomCode = null
+                savedRoomName = null
+                savedServerUrl = null
+                savedParticipantToken = null
+                isInRoom = false
+                overlayEnabled = false
+                pushToTalk = false
+                OverlayControlsService.stop(context)
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(roomPreferenceListener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(roomPreferenceListener) }
+    }
 
     LaunchedEffect(session.isConnected, session.isConnecting) {
         val isSessionAlive = session.isConnected || session.isConnecting
@@ -398,9 +415,8 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                     }
                 },
                 onLeave = {
+                    VoiceRoomService.leave(context)
                     OverlayControlsService.stop(context)
-                    activity.stopService(Intent(context, VoiceRoomService::class.java))
-                    VoiceSessionManager.endSession()
                     preferences.edit()
                         .remove("room_code")
                         .remove("room_name")

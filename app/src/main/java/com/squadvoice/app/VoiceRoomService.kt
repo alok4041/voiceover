@@ -39,14 +39,7 @@ class VoiceRoomService : Service() {
             }
 
             ACTION_LEAVE -> {
-                getSharedPreferences("squadvoice", MODE_PRIVATE).edit()
-                    .remove("room_code")
-                    .remove("room_name")
-                    .remove("server_url")
-                    .remove("participant_token")
-                    .remove("overlay_enabled")
-                    .apply()
-                stopSelf()
+                leaveRoom(startId)
                 return START_NOT_STICKY
             }
         }
@@ -74,7 +67,9 @@ class VoiceRoomService : Service() {
 
     override fun onDestroy() {
         notificationJob?.cancel()
+        notificationJob = null
         serviceScope.cancel()
+        removeRoomNotification()
         VoiceSessionManager.endSession()
         OverlayControlsService.stop(this)
         super.onDestroy()
@@ -99,6 +94,27 @@ class VoiceRoomService : Service() {
     private fun refreshNotification(state: VoiceSessionState) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, makeNotification(state))
+    }
+
+    private fun leaveRoom(startId: Int? = null) {
+        notificationJob?.cancel()
+        notificationJob = null
+        getSharedPreferences("squadvoice", MODE_PRIVATE).edit()
+            .remove("room_code")
+            .remove("room_name")
+            .remove("server_url")
+            .remove("participant_token")
+            .remove("overlay_enabled")
+            .apply()
+        OverlayControlsService.stop(this)
+        VoiceSessionManager.endSession()
+        removeRoomNotification()
+        if (startId != null) stopSelf(startId) else stopSelf()
+    }
+
+    private fun removeRoomNotification() {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 
     private fun makeNotification(state: VoiceSessionState): Notification {
@@ -187,6 +203,12 @@ class VoiceRoomService : Service() {
                 .putExtra(EXTRA_TOKEN, credentials.participantToken)
                 .putExtra(EXTRA_PARTICIPANT_NAME, participantName)
             ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun leave(context: Context) {
+            context.startService(
+                Intent(context, VoiceRoomService::class.java).setAction(ACTION_LEAVE),
+            )
         }
     }
 }
