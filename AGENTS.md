@@ -117,6 +117,17 @@ Do not deploy the website through Render as a substitute for GitHub Pages; the c
 
 APK distribution is through a public GitHub Release, not by committing large APK files into the Git repository. The website lists releases that have an `.apk` asset; the in-app update checker also relies on the GitHub Releases API.
 
+### Required release sequence
+
+1. Inspect and review the exact source changes. Do not build or publish from uncommitted app changes.
+2. Commit the app changes and version bump to a named Git branch. Record the commit SHA and branch. A release branch commit is a commit, but it does not update `main`; state this distinction plainly.
+3. Build the APK from that committed source revision, not from a different checkout. Verify the APK package name, `versionCode`, `versionName`, signing certificate, size, and SHA-256. The release tag must point to the same source commit as the APK.
+4. Push the source branch and matching tag, then create the GitHub Release and upload `app-debug.apk`. Never describe a local build or a pushed tag alone as a published release.
+5. Verify GitHub's latest-release API returns the new tag and APK asset. Then reload the live website and confirm its version card and download link show the same release. The website has a saved fallback list; if it is showing the fallback or an older version, the site is not verified as updated. Investigate the browser/API cache or update the site fallback in both `index.html` and `token-server/public/index.html`, then deploy that site change through the configured Pages source.
+6. Report each state separately: local commit, pushed branch, tag, published release, live website, and device installation. A commit made in an isolated worktree does not clear uncommitted changes in the user's original checkout. Never imply the user's checkout is clean unless you verified it.
+
+Keep the APK out of Git history. Do not install a release on a connected phone unless the user directly asks; publishing a release does not mean installing it on the user's device.
+
 Before a new app release:
 
 1. Finish the requested code changes and review `git diff`.
