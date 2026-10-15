@@ -280,7 +280,13 @@
           return card;
         }
 
-        fetch(releasesUrl, { headers: { Accept: 'application/vnd.github+json' } })
+        fetch(releasesUrl, {
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/vnd.github+json',
+            'Cache-Control': 'no-cache',
+          },
+        })
           .then((response) => {
             if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
             return response.json();
@@ -293,6 +299,12 @@
 
             if (publishedApks.length === 0) {
               releaseStatus.textContent = 'No APK releases are published yet. Check GitHub Releases for updates.';
+              return;
+            }
+
+            const savedLatestTag = releaseList.querySelector('.release-tag')?.textContent.trim();
+            if (savedLatestTag && !publishedApks.some(({ release }) => release.tag_name === savedLatestTag)) {
+              releaseStatus.textContent = 'Showing the saved versions while GitHub release data refreshes.';
               return;
             }
 
