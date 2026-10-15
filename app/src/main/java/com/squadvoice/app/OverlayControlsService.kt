@@ -29,6 +29,7 @@ class OverlayControlsService : Service() {
             stopSelf()
             return
         }
+        isRunning = true
 
         windowManager = getSystemService(WindowManager::class.java)
         control = TextView(this).apply {
@@ -69,6 +70,7 @@ class OverlayControlsService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
         serviceScope.cancel()
         runCatching { control?.let { windowManager?.removeView(it) } }
         control = null
@@ -79,6 +81,10 @@ class OverlayControlsService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
         fun start(context: Context) {
             if (Settings.canDrawOverlays(context)) {
                 context.startService(Intent(context, OverlayControlsService::class.java))
@@ -86,6 +92,7 @@ class OverlayControlsService : Service() {
         }
 
         fun stop(context: Context) {
+            isRunning = false
             context.stopService(Intent(context, OverlayControlsService::class.java))
         }
     }

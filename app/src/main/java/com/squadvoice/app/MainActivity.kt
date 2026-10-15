@@ -154,13 +154,24 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val session by VoiceSessionManager.state.collectAsState()
 
+    val isSessionActive = VoiceSessionManager.state.value.isConnected || VoiceSessionManager.state.value.isConnecting
+    val restoredRoomCode = if (isSessionActive) preferences.getString("room_code", null) else null
+    val restoredRoomName = if (isSessionActive) preferences.getString("room_name", null) else null
+    val restoredServerUrl = if (isSessionActive) preferences.getString("server_url", null) else null
+    val restoredParticipantToken = if (isSessionActive) preferences.getString("participant_token", null) else null
+    val canRestoreSession = isSessionActive &&
+        !restoredRoomCode.isNullOrBlank() &&
+        !restoredRoomName.isNullOrBlank() &&
+        !restoredServerUrl.isNullOrBlank() &&
+        !restoredParticipantToken.isNullOrBlank()
+
     var playerName by rememberSaveable { mutableStateOf(preferences.getString("player_name", "") ?: "") }
     var roomName by rememberSaveable { mutableStateOf("") }
     var joinCode by rememberSaveable { mutableStateOf("") }
-    var savedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedRoomName by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedServerUrl by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedParticipantToken by rememberSaveable { mutableStateOf<String?>(null) }
+    var savedRoomCode by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredRoomCode else null) }
+    var savedRoomName by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredRoomName else null) }
+    var savedServerUrl by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredServerUrl else null) }
+    var savedParticipantToken by rememberSaveable { mutableStateOf(if (canRestoreSession) restoredParticipantToken else null) }
     val activeRoom = if (
         savedRoomCode != null && savedRoomName != null && savedServerUrl != null && savedParticipantToken != null
     ) {
@@ -168,12 +179,39 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     } else {
         null
     }
-    var isInRoom by rememberSaveable { mutableStateOf(false) }
+    var isInRoom by rememberSaveable { mutableStateOf(canRestoreSession) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pendingRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var overlayEnabled by rememberSaveable { mutableStateOf(false) }
+    var overlayEnabled by rememberSaveable {
+        mutableStateOf(OverlayControlsService.isRunning || (isSessionActive && preferences.getBoolean("overlay_enabled", false) && Settings.canDrawOverlays(context)))
+    }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val active = VoiceSessionManager.state.value.isConnected || VoiceSessionManager.state.value.isConnecting
+        if (active) {
+            val code = preferences.getString("room_code", null)
+            val name = preferences.getString("room_name", null)
+            val url = preferences.getString("server_url", null)
+            val token = preferences.getString("participant_token", null)
+            if (!code.isNullOrBlank() && !name.isNullOrBlank() && !url.isNullOrBlank() && !token.isNullOrBlank()) {
+                savedRoomCode = code
+                savedRoomName = name
+                savedServerUrl = url
+                savedParticipantToken = token
+                isInRoom = true
+                overlayEnabled = OverlayControlsService.isRunning || (preferences.getBoolean("overlay_enabled", false) && Settings.canDrawOverlays(context))
+            }
+        } else if (!isLoading) {
+            savedRoomCode = null
+            savedRoomName = null
+            savedServerUrl = null
+            savedParticipantToken = null
+            isInRoom = false
+            overlayEnabled = false
+        }
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -206,6 +244,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
         if (Settings.canDrawOverlays(context)) {
             OverlayControlsService.start(context)
             overlayEnabled = true
+            preferences.edit().putBoolean("overlay_enabled", true).apply()
             errorMessage = null
         } else {
             errorMessage = "Overlay permission was not enabled. You can still use the in-app controls."
@@ -239,6 +278,12 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
         coroutineScope.launch {
             try {
                 val credentials = action()
+                preferences.edit()
+                    .putString("room_code", credentials.code)
+                    .putString("room_name", credentials.roomName)
+                    .putString("server_url", credentials.serverUrl)
+                    .putString("participant_token", credentials.participantToken)
+                    .apply()
                 savedRoomCode = credentials.code
                 savedRoomName = credentials.roomName
                 savedServerUrl = credentials.serverUrl
@@ -274,7 +319,7 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
     ) {
         if (isInRoom && activeRoom != null) {
             RoomScreen(
-                room = activeRoom!!,
+                room = activeRoom,
                 session = session,
                 errorMessage = errorMessage ?: session.errorMessage,
                 pushToTalk = pushToTalk,
@@ -286,15 +331,17 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 onTogglePushToTalk = { enabled ->
                     pushToTalk = enabled
                 },
-                onCopyCode = { copyRoomCode(context, activeRoom!!.code) },
-                onShareCode = { shareRoomCode(context, activeRoom!!.code) },
+                onCopyCode = { copyRoomCode(context, activeRoom.code) },
+                onShareCode = { shareRoomCode(context, activeRoom.code) },
                 onToggleOverlay = {
                     if (overlayEnabled) {
                         OverlayControlsService.stop(context)
                         overlayEnabled = false
+                        preferences.edit().putBoolean("overlay_enabled", false).apply()
                     } else if (Settings.canDrawOverlays(context)) {
                         OverlayControlsService.start(context)
                         overlayEnabled = true
+                        preferences.edit().putBoolean("overlay_enabled", true).apply()
                     } else {
                         overlayPermissionLauncher.launch(
                             Intent(
@@ -307,6 +354,14 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 onLeave = {
                     OverlayControlsService.stop(context)
                     activity.stopService(Intent(context, VoiceRoomService::class.java))
+                    VoiceSessionManager.endSession()
+                    preferences.edit()
+                        .remove("room_code")
+                        .remove("room_name")
+                        .remove("server_url")
+                        .remove("participant_token")
+                        .remove("overlay_enabled")
+                        .apply()
                     savedRoomCode = null
                     savedRoomName = null
                     savedServerUrl = null
