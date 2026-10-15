@@ -44,6 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -78,6 +79,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -391,6 +393,9 @@ private fun SquadVoiceApp(darkMode: Boolean, onToggleTheme: () -> Unit) {
                 onToggleTheme = onToggleTheme,
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
+                onSetParticipantVolume = { identity, volumePercent ->
+                    VoiceSessionManager.setParticipantVolume(identity, volumePercent)
+                },
                 onTogglePushToTalk = { enabled ->
                     pushToTalk = enabled
                 },
@@ -601,12 +606,15 @@ private fun RoomScreen(
     onToggleTheme: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
+    onSetParticipantVolume: (String, Int) -> Unit,
     onTogglePushToTalk: (Boolean) -> Unit,
     onCopyCode: () -> Unit,
     onShareCode: () -> Unit,
     onToggleOverlay: () -> Unit,
     onLeave: () -> Unit,
 ) {
+    var expandedVolumeIdentity by remember(room.code) { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -675,7 +683,15 @@ private fun RoomScreen(
                     }
                 } else {
                     session.participants.forEachIndexed { index, participant ->
-                        ParticipantRow(participant)
+                        ParticipantRow(
+                            participant = participant,
+                            volumeExpanded = !participant.isLocal && expandedVolumeIdentity == participant.identity,
+                            onToggleVolume = {
+                                expandedVolumeIdentity =
+                                    if (expandedVolumeIdentity == participant.identity) null else participant.identity
+                            },
+                            onVolumeChange = { percent -> onSetParticipantVolume(participant.identity, percent) },
+                        )
                         if (index != session.participants.lastIndex) {
                             Spacer(Modifier.height(1.dp))
                             Box(Modifier.fillMaxWidth().height(1.dp).background(RaisedPanel))
@@ -829,32 +845,65 @@ private fun MicControl(
 }
 
 @Composable
-private fun ParticipantRow(participant: ParticipantUi) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(if (participant.isSpeaking) Mint else RaisedPanel)
-                .border(2.dp, if (participant.isSpeaking) Mint else Color.Transparent, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(participant.name.firstOrNull()?.uppercase() ?: "?", color = if (participant.isSpeaking) Ink else MutedText, fontWeight = FontWeight.Bold)
+private fun ParticipantRow(
+    participant: ParticipantUi,
+    volumeExpanded: Boolean,
+    onToggleVolume: () -> Unit,
+    onVolumeChange: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (participant.isSpeaking) Mint else RaisedPanel)
+                    .border(2.dp, if (participant.isSpeaking) Mint else Color.Transparent, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(participant.name.firstOrNull()?.uppercase() ?: "?", color = if (participant.isSpeaking) Ink else MutedText, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (participant.isLocal) "${participant.name} (you)" else participant.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(if (participant.isSpeaking) "Speaking" else "In the room", fontSize = 11.sp, color = if (participant.isSpeaking) Mint else MutedText)
+            }
+            if (participant.isLocal) {
+                if (participant.isSpeaking) Box(Modifier.size(8.dp).clip(CircleShape).background(Mint))
+            } else {
+                TextButtonLabel("Volume ${participant.volumePercent}%", onToggleVolume)
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                if (participant.isLocal) "${participant.name} (you)" else participant.name,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+        if (volumeExpanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 48.dp, top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Only on your phone", fontSize = 11.sp, color = MutedText)
+                Spacer(Modifier.weight(1f))
+                TextButtonLabel("Reset", { onVolumeChange(100) })
+            }
+            Slider(
+                value = participant.volumePercent.toFloat(),
+                onValueChange = { onVolumeChange(it.roundToInt()) },
+                valueRange = 0f..200f,
+                steps = 19,
+                modifier = Modifier.padding(start = 42.dp, end = 4.dp),
             )
-            Text(if (participant.isSpeaking) "Speaking" else "In the room", fontSize = 11.sp, color = if (participant.isSpeaking) Mint else MutedText)
-        }
-        if (participant.isSpeaking) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(Mint))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("0% · muted", fontSize = 10.sp, color = MutedText)
+                Spacer(Modifier.weight(1f))
+                Text("100% · normal", fontSize = 10.sp, color = MutedText)
+                Spacer(Modifier.weight(1f))
+                Text("200% · boost", fontSize = 10.sp, color = MutedText)
+            }
         }
     }
 }

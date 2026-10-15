@@ -11,6 +11,8 @@ import io.livekit.android.audio.NoAudioHandler
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
+import io.livekit.android.room.participant.RemoteParticipant
+import io.livekit.android.room.track.RemoteAudioTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,6 +29,7 @@ data class ParticipantUi(
     val name: String,
     val isLocal: Boolean,
     val isSpeaking: Boolean,
+    val volumePercent: Int = 100,
 )
 
 data class VoiceSessionState(
@@ -48,6 +51,7 @@ object VoiceSessionManager {
     private var localName: String = ""
     private var localIdentity: String = ""
     private var activeSpeakerIds: Set<String> = emptySet()
+    private val participantVolumePercent = mutableMapOf<String, Int>()
 
     fun connect(context: Context, credentials: RoomCredentials, participantName: String) {
         scope.launch {
@@ -128,6 +132,15 @@ object VoiceSessionManager {
                         is RoomEvent.ParticipantDisconnected,
                         is RoomEvent.ParticipantNameChanged -> publishParticipants(newRoom)
 
+                        is RoomEvent.TrackSubscribed -> {
+                            val identity = event.participant.identity?.value
+                            val audioTrack = event.track as? RemoteAudioTrack
+                            if (identity != null && audioTrack != null) {
+                                val percent = participantVolumePercent[identity] ?: DEFAULT_REMOTE_VOLUME_PERCENT
+                                audioTrack.setVolume(percent / 100.0)
+                            }
+                        }
+
                         else -> Unit
                     }
                 }
@@ -178,6 +191,22 @@ object VoiceSessionManager {
         }
     }
 
+    fun setParticipantVolume(identity: String, volumePercent: Int) {
+        val percent = volumePercent.coerceIn(MIN_REMOTE_VOLUME_PERCENT, MAX_REMOTE_VOLUME_PERCENT)
+        participantVolumePercent[identity] = percent
+        val gain = percent / 100.0
+        room?.remoteParticipants?.values
+            ?.firstOrNull { it.identity?.value == identity }
+            ?.let { participant -> applyParticipantVolume(participant, gain) }
+        mutableState.update { current ->
+            current.copy(
+                participants = current.participants.map { participant ->
+                    if (participant.identity == identity) participant.copy(volumePercent = percent) else participant
+                },
+            )
+        }
+    }
+
     fun endSession() {
         scope.launch { disconnectNow() }
     }
@@ -189,8 +218,15 @@ object VoiceSessionManager {
         room = null
         activeSpeakerIds = emptySet()
         localIdentity = ""
+        participantVolumePercent.clear()
         runCatching { oldRoom?.disconnect() }
         mutableState.value = VoiceSessionState()
+    }
+
+    private fun applyParticipantVolume(participant: RemoteParticipant, gain: Double) {
+        participant.audioTrackPublications.forEach { (_, track) ->
+            if (track is RemoteAudioTrack) track.setVolume(gain)
+        }
     }
 
     private fun publishParticipants(currentRoom: Room) {
@@ -221,6 +257,11 @@ object VoiceSessionManager {
             name = name?.takeIf(String::isNotBlank) ?: participantIdentity,
             isLocal = false,
             isSpeaking = participantIdentity in speakers,
+            volumePercent = participantVolumePercent[participantIdentity] ?: DEFAULT_REMOTE_VOLUME_PERCENT,
         )
     }
+
+    private const val DEFAULT_REMOTE_VOLUME_PERCENT = 100
+    private const val MIN_REMOTE_VOLUME_PERCENT = 0
+    private const val MAX_REMOTE_VOLUME_PERCENT = 200
 }
