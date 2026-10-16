@@ -42,6 +42,7 @@ const HAZARDS = [
 export class RopeboundGameCore {
   #rooms = new Map();
 
+  /** Adds a validated player to a lobby’s smaller team, or returns an existing player’s snapshot. */
   join(roomCode, identity, name) {
     const code = cleanText(roomCode, 32);
     const playerId = cleanText(identity, 128);
@@ -87,6 +88,7 @@ export class RopeboundGameCore {
     return this.snapshot(code, playerId);
   }
 
+  /** Removes a player, transfers host ownership, and ends a race if a team becomes empty. */
   leave(roomCode, identity) {
     const room = this.#rooms.get(cleanText(roomCode, 32));
     if (!room) return false;
@@ -111,6 +113,7 @@ export class RopeboundGameCore {
     return removed;
   }
 
+  /** Moves a lobby player to a team with capacity and clears their ready status. */
   chooseTeam(roomCode, identity, team) {
     const room = this.#requireRoom(roomCode);
     const player = this.#requirePlayer(room, identity);
@@ -124,6 +127,7 @@ export class RopeboundGameCore {
     return this.snapshot(room.code, player.id);
   }
 
+  /** Sets a player’s readiness while the room is in the lobby. */
   setReady(roomCode, identity, ready) {
     const room = this.#requireRoom(roomCode);
     const player = this.#requirePlayer(room, identity);
@@ -133,6 +137,7 @@ export class RopeboundGameCore {
     return this.snapshot(room.code, player.id);
   }
 
+  /** Starts a race for the host only when both teams have runners and everyone is ready. */
   start(roomCode, identity) {
     const room = this.#requireRoom(roomCode);
     this.#requirePlayer(room, identity);
@@ -152,6 +157,7 @@ export class RopeboundGameCore {
     return this.snapshot(room.code, identity);
   }
 
+  /** Resets a completed race to the lobby for the host, preserving players and team assignments. */
   rematch(roomCode, identity) {
     const room = this.#requireRoom(roomCode);
     this.#requirePlayer(room, identity);
@@ -344,6 +350,7 @@ export class RopeboundGameCore {
     return this.snapshot(room.code, null);
   }
 
+  /** Returns viewer-filtered state, hiding rival runners during a race and refreshing viewer presence. */
   snapshot(roomCode, viewerIdentity) {
     const room = this.#requireRoom(roomCode);
     const viewer = viewerIdentity ? this.#requirePlayer(room, viewerIdentity) : null;
@@ -400,14 +407,17 @@ export class RopeboundGameCore {
     };
   }
 
+  /** Deletes an in-memory game room and returns whether it existed. */
   deleteRoom(roomCode) {
     return this.#rooms.delete(cleanText(roomCode, 32));
   }
 
+  /** Returns the codes of all in-memory game rooms for simulation scheduling. */
   roomCodes() {
     return [...this.#rooms.keys()];
   }
 
+  /** Removes players beyond the presence grace period, reassigns hosts, and resolves empty-team races. */
   cleanupStalePlayers(now = Date.now(), graceMs = 30_000) {
     for (const room of this.#rooms.values()) {
       const stale = [...room.players.values()].filter((player) => now - player.lastSeenAt > graceMs);
@@ -433,18 +443,21 @@ export class RopeboundGameCore {
     }
   }
 
+  /** Returns the normalized room or throws game_not_found. */
   #requireRoom(code) {
     const room = this.#rooms.get(cleanText(code, 32));
     if (!room) throw new GameError('Game lobby not found.', 'game_not_found');
     return room;
   }
 
+  /** Returns a room member by normalized identity or throws player_not_in_game. */
   #requirePlayer(room, identity) {
     const player = room.players.get(cleanText(identity, 128));
     if (!player) throw new GameError('Player is not in this game lobby.', 'player_not_in_game');
     return player;
   }
 
+  /** Respawns a team in its checkpoint lane and clears motion, controls, and hazard timers. */
   #resetTeam(room, team) {
     const members = teamPlayers(room, team);
     const positions = formationPositions(room.checkpoints[team], members.length);
@@ -464,6 +477,7 @@ export class RopeboundGameCore {
     });
   }
 
+  /** Corrects adjacent runner positions and velocities to constrain rope gaps and preserve runner order. */
   #enforceRope(room, team) {
     const members = teamPlayers(room, team);
     // Revisit adjacent links because correcting one pair can stretch the next.
@@ -497,6 +511,7 @@ export class RopeboundGameCore {
 }
 
 export class GameError extends Error {
+  /** Creates a game-rule error with a stable code for API error responses. */
   constructor(message, code) {
     super(message);
     this.name = 'GameError';
@@ -504,6 +519,7 @@ export class GameError extends Error {
   }
 }
 
+/** Creates an empty lobby with initial checkpoints, timestamps, and effect state. */
 function createRoom(code) {
   return {
     code,
@@ -522,6 +538,7 @@ function createRoom(code) {
   };
 }
 
+/** Stores the latest team-specific impact effect with an increasing ID and normalized position. */
 function emitEffect(room, team, player, type, at) {
   room.effectSequence += 1;
   room.effect = {
@@ -533,6 +550,7 @@ function emitEffect(room, team, player, type, at) {
   };
 }
 
+/** Returns the next hazard relative to the team’s leading runner, or null if none is available. */
 function getHazardHint(room, team) {
   if (!team) return null;
   const members = teamPlayers(room, team);
@@ -551,6 +569,7 @@ function getHazardHint(room, team) {
   };
 }
 
+/** Returns leader-first respawn positions evenly spaced across the checkpoint’s safe lane. */
 function formationPositions(checkpoint, count) {
   if (count <= 1) return [checkpoint];
   const lane = RESPAWN_LANES[checkpoint] ?? {
@@ -561,12 +580,14 @@ function formationPositions(checkpoint, count) {
   return Array.from({ length: count }, (_, index) => Number((lane.end - index * spacing).toFixed(2)));
 }
 
+/** Returns a team’s players in their original join order for rope and formation calculations. */
 function teamPlayers(room, team) {
   return [...room.players.values()]
     .filter((player) => player.team === team)
     .sort((left, right) => left.order - right.order);
 }
 
+/** Chooses a team with capacity, preferring A on ties, or throws when both teams are full. */
 function smallestTeam(room) {
   const countA = teamSize(room, 'A');
   const countB = teamSize(room, 'B');
@@ -574,16 +595,19 @@ function smallestTeam(room) {
   return countA <= countB && countA < MAX_PER_TEAM ? 'A' : 'B';
 }
 
+/** Counts the players currently assigned to a team. */
 function teamSize(room, team) {
   let count = 0;
   for (const player of room.players.values()) if (player.team === team) count += 1;
   return count;
 }
 
+/** Trims and truncates string input, returning an empty string for other values. */
 function cleanText(value, maximumLength) {
   return typeof value === 'string' ? value.trim().slice(0, maximumLength) : '';
 }
 
+/** Bounds a numeric value to the inclusive minimum and maximum. */
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }

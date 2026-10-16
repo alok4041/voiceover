@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
+/** Shows voice-room participants, microphone and overlay controls, and the Ropebound entry action. */
 @Composable
 internal fun VoiceRoomScreen(
     room: RoomCredentials,
@@ -235,6 +236,7 @@ internal fun VoiceRoomScreen(
     }
 }
 
+/** Handles tap-to-toggle or hold-to-talk gestures and displays the current microphone state. */
 @Composable
 private fun MicControl(
     micEnabled: Boolean,
@@ -311,6 +313,7 @@ private fun MicControl(
     }
 }
 
+/** Shows participant audio status and optional local playback-volume controls for a remote player. */
 @Composable
 private fun ParticipantRow(
     participant: ParticipantUi,
@@ -415,6 +418,7 @@ private val MutedText: Color
 private val Alert: Color
     @Composable get() = MaterialTheme.colorScheme.error
 
+/** Renders a compact clickable text action with an accessibility label. */
 @Composable
 private fun TextButtonLabel(
     label: String,
@@ -435,6 +439,7 @@ private fun TextButtonLabel(
     )
 }
 
+/** Displays a voice-room error using the theme’s error colors. */
 @Composable
 private fun ErrorNotice(message: String) {
     Row(

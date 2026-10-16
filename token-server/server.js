@@ -154,6 +154,7 @@ function createRoomCode() {
   throw new Error('Could not allocate a unique room code.');
 }
 
+/** Validates the room code and bearer token’s room-join grant, returning participant identity and name. */
 function requireRoomParticipant(request, roomCode) {
   if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(roomCode)) {
     throw new GameError('Enter a valid six-character voice room code.', 'invalid_room_code');
@@ -171,6 +172,7 @@ function requireRoomParticipant(request, roomCode) {
   };
 }
 
+/** Verifies JWT structure, HS256 signature, subject, and expiry, or throws an authentication error. */
 function verifyParticipantToken(token) {
   const parts = token.split('.');
   if (parts.length !== 3) throw new AuthenticationError('The voice-room token is invalid.', 'invalid_token');
@@ -216,6 +218,7 @@ function readText(value, maximumLength) {
 }
 
 class AuthenticationError extends Error {
+  /** Creates an authentication error with a stable code for API error responses. */
   constructor(message, code) {
     super(message);
     this.name = 'AuthenticationError';

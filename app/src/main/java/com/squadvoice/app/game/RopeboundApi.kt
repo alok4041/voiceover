@@ -65,12 +65,15 @@ internal data class RopeboundSnapshot(
 internal class RopeboundApi(
     private val baseUrl: String = BuildConfig.TOKEN_SERVER_URL,
 ) {
+    /** Joins the voice room’s game lobby using its participant token and returns the current snapshot. */
     suspend fun join(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/join", roomCode, participantToken)
 
+    /** Fetches the current game snapshot filtered for the authenticated participant. */
     suspend fun state(roomCode: String, participantToken: String): RopeboundSnapshot =
         request("GET", "/games/state?roomCode=${roomCode.encodeUrl()}", roomCode, participantToken)
 
+    /** Streams participant-filtered snapshots over SSE and disconnects when collection ends. */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun events(roomCode: String, participantToken: String): Flow<RopeboundSnapshot> = callbackFlow {
         val connectionRef = AtomicReference<HttpURLConnection?>(null)
@@ -113,18 +116,23 @@ internal class RopeboundApi(
         }
     }
 
+    /** Requests a lobby team change and returns the updated snapshot. */
     suspend fun chooseTeam(roomCode: String, participantToken: String, team: String): RopeboundSnapshot =
         post("/games/team", roomCode, participantToken, JSONObject().put("team", team))
 
+    /** Updates the participant’s lobby readiness and returns the updated snapshot. */
     suspend fun setReady(roomCode: String, participantToken: String, ready: Boolean): RopeboundSnapshot =
         post("/games/ready", roomCode, participantToken, JSONObject().put("ready", ready))
 
+    /** Requests that the host start a race after both teams are ready. */
     suspend fun start(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/start", roomCode, participantToken)
 
+    /** Requests that the host reset a completed race to the lobby. */
     suspend fun rematch(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/rematch", roomCode, participantToken)
 
+    /** Sends controls with an increasing sequence number; positions remain server-authoritative. */
     suspend fun input(
         roomCode: String,
         participantToken: String,
@@ -142,10 +150,12 @@ internal class RopeboundApi(
         )
     }
 
+    /** Removes the authenticated participant from the game without leaving the voice room. */
     suspend fun leave(roomCode: String, participantToken: String) {
         requestJson("POST", "/games/leave", roomCode, participantToken, JSONObject().put("roomCode", roomCode))
     }
 
+    /** Adds the room code to the supplied JSON payload and posts it for an updated snapshot. */
     private suspend fun post(
         path: String,
         roomCode: String,
@@ -156,6 +166,7 @@ internal class RopeboundApi(
         return request("POST", path, roomCode, participantToken, extra)
     }
 
+    /** Performs an authenticated game request and decodes its response as a snapshot. */
     private suspend fun request(
         method: String,
         path: String,
@@ -164,6 +175,7 @@ internal class RopeboundApi(
         body: JSONObject? = null,
     ): RopeboundSnapshot = parseSnapshot(requestJson(method, path, roomCode, participantToken, body))
 
+    /** Exchanges JSON on the IO dispatcher, reports server errors, and always disconnects. */
     private suspend fun requestJson(
         method: String,
         path: String,
@@ -197,6 +209,7 @@ internal class RopeboundApi(
         }
     }
 
+    /** Decodes game state, preserving optional hazard/effect data and defaulting absent fields. */
     private fun parseSnapshot(json: JSONObject): RopeboundSnapshot {
         val teams = json.getJSONObject("teams")
         val checkpoints = json.optJSONObject("checkpoints") ?: JSONObject()
@@ -231,6 +244,7 @@ internal class RopeboundApi(
         )
     }
 
+    /** Decodes team statistics and players, allowing rival snapshots to omit player details. */
     private fun parseTeam(json: JSONObject): RopeboundTeam {
         val playersJson = json.optJSONArray("players")
         val players = buildList {
@@ -263,8 +277,13 @@ internal class RopeboundApi(
     }
 }
 
+/** Encodes this room code as a UTF-8 query parameter value. */
 private fun String.encodeUrl(): String = java.net.URLEncoder.encode(this, Charsets.UTF_8.name())
 
+/**
+ * Reads the JWT subject for local player matching, returning an empty string on failure.
+ * This only decodes the token; authentication is performed by the server.
+ */
 internal fun participantIdentity(token: String): String = runCatching {
     val payload = token.split('.')[1]
     JSONObject(String(java.util.Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)).optString("sub")

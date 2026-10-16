@@ -63,6 +63,7 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
     });
     response.flushHeaders();
     response.write('retry: 1500\n\n');
+    /** Writes a viewer-filtered SSE snapshot, closing the response if the player or room is gone. */
     const sendState = () => {
       if (response.destroyed || response.writableEnded) return;
       try {
@@ -88,6 +89,7 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
   gamePresenceCleanup.unref();
 }
 
+/** Trims and truncates string input, returning an empty string for other values. */
 function readText(value, maximumLength) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, maximumLength);

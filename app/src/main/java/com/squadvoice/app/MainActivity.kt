@@ -116,6 +116,7 @@ import androidx.compose.runtime.withFrameNanos
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    /** Loads saved appearance and microphone settings and installs the Compose app with its startup loader. */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val preferences = getSharedPreferences("squadvoice", MODE_PRIVATE)
@@ -288,6 +289,7 @@ private fun SquadVoiceTheme(
     )
 }
 
+/** Draws the animated loading track shown while the first app frame is prepared. */
 @Composable
 private fun SquadVoiceSplashScreen(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "squadvoice-splash")
@@ -335,6 +337,7 @@ private fun SquadVoiceSplashScreen(modifier: Modifier = Modifier) {
     }
 }
 
+/** Coordinates saved room state, voice controls, settings, updates, and landscape game navigation. */
 @Composable
 private fun SquadVoiceApp(
     darkMode: Boolean,
@@ -407,6 +410,7 @@ private fun SquadVoiceApp(
         }
     }
 
+    /** Returns to the voice UI and attempts to leave the game while preserving the voice session. */
     fun closeRopeboundGame() {
         val room = activeRoom
         showRopeboundGame = false

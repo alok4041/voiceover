@@ -80,6 +80,7 @@ private data class GameControlState(
         }
 }
 
+/** Manages the game connection, controls, and lobby/race/results UI within an active voice room. */
 @Composable
 internal fun RopeboundGameScreen(
     roomCode: String,
@@ -112,6 +113,7 @@ internal fun RopeboundGameScreen(
         }
     }
 
+    /** Runs one lobby or results request at a time, updating the snapshot or displayed error. */
     fun action(block: suspend () -> RopeboundSnapshot) {
         if (busy) return
         busy = true
@@ -127,6 +129,7 @@ internal fun RopeboundGameScreen(
         }
     }
 
+    /** Updates the held back/run control for direction -1 or 1. */
     fun setMove(direction: Int, pressed: Boolean) {
         controls.update { current ->
             when (direction) {
@@ -137,10 +140,12 @@ internal fun RopeboundGameScreen(
         }
     }
 
+    /** Updates whether the brace control is held. */
     fun setBrace(pressed: Boolean) {
         controls.update { it.copy(bracing = pressed) }
     }
 
+    /** Queues a jump pulse by advancing the local jump sequence. */
     fun jump() {
         controls.update { it.copy(jumpSequence = it.jumpSequence + 1) }
     }
@@ -194,6 +199,7 @@ internal fun RopeboundGameScreen(
         }
     }
 
+    /** Attempts to leave the game for up to 1.5 seconds before returning to the voice room. */
     fun exitGame() {
         scope.launch {
             withTimeoutOrNull(1_500) { runCatching { api.leave(roomCode, participantToken) } }
@@ -265,6 +271,7 @@ internal fun RopeboundGameScreen(
     }
 }
 
+/** Shows connection progress or the latest lobby connection error. */
 @Composable
 private fun LoadingLobby(error: String?) {
     Column(
@@ -278,6 +285,7 @@ private fun LoadingLobby(error: String?) {
     }
 }
 
+/** Shows team selection and readiness, enabling race start for a host with ready teams. */
 @Composable
 private fun LobbyContent(
     modifier: Modifier = Modifier,
@@ -323,6 +331,7 @@ private fun LobbyContent(
     }
 }
 
+/** Lists a team’s runners and offers a team switch when no action is pending. */
 @Composable
 private fun TeamCard(
     title: String,
@@ -367,6 +376,7 @@ private fun TeamCard(
     }
 }
 
+/** Shows team progress, the local course, hazard hints, and movement controls. */
 @Composable
 private fun RaceContent(
     modifier: Modifier = Modifier,
@@ -422,6 +432,7 @@ private fun RaceContent(
     }
 }
 
+/** Reports press and release state for a directional movement control. */
 @Composable
 private fun HoldMoveButton(
     label: String,
@@ -441,6 +452,7 @@ private fun HoldMoveButton(
     ) { Text(label) }
 }
 
+/** Reports press and release state for the brace control. */
 @Composable
 private fun HoldBraceButton(onBrace: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -449,6 +461,7 @@ private fun HoldBraceButton(onBrace: (Boolean) -> Unit, modifier: Modifier = Mod
     OutlinedButton(onClick = {}, modifier = modifier, interactionSource = interactionSource) { Text("Brace") }
 }
 
+/** Displays a team’s normalized course progress as a clamped percentage. */
 @Composable
 private fun RaceMarker(label: String, progress: Float, modifier: Modifier = Modifier) {
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(9.dp)) {
@@ -457,6 +470,7 @@ private fun RaceMarker(label: String, progress: Float, modifier: Modifier = Modi
     }
 }
 
+/** Displays normalized rope tension as a clamped percentage. */
 @Composable
 private fun RopeTensionMarker(tension: Float, modifier: Modifier = Modifier) {
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(9.dp)) {
@@ -465,6 +479,7 @@ private fun RopeTensionMarker(tension: Float, modifier: Modifier = Modifier) {
     }
 }
 
+/** Draws the local team, ropes, hazards, and impact effects with a player-following camera. */
 @Composable
 private fun CourseCanvas(team: RopeboundTeam, viewerIdentity: String, effect: RopeboundEffect?) {
     val backgroundImage = ImageBitmap.imageResource(R.drawable.ropebound_training_yard_v2)
@@ -517,6 +532,7 @@ private fun CourseCanvas(team: RopeboundTeam, viewerIdentity: String, effect: Ro
 
         val courseLeft = w * .04f
         val courseWidth = w * .92f
+        /** Maps normalized course progress to canvas x coordinates relative to the camera. */
         fun courseX(progress: Float) = courseLeft + courseWidth * ((progress - cameraLeft) / cameraWidth)
         val pitLeft = courseX(.23f)
         val pitRight = courseX(.29f)
@@ -741,6 +757,7 @@ private fun CourseCanvas(team: RopeboundTeam, viewerIdentity: String, effect: Ro
     }
 }
 
+/** Shows the race outcome, winner celebration, and host-controlled rematch action. */
 @Composable
 private fun ResultContent(
     state: RopeboundSnapshot,
@@ -794,6 +811,7 @@ private fun ResultContent(
     }
 }
 
+/** Animates a party-popper emoji with an optional reversed tilt. */
 @Composable
 private fun WinnerPartyPopper(reversed: Boolean = false) {
     val transition = rememberInfiniteTransition(label = "winner-popper")
@@ -817,6 +835,7 @@ private fun WinnerPartyPopper(reversed: Boolean = false) {
     )
 }
 
+/** Draws repeating falling confetti across the supplied canvas bounds. */
 @Composable
 private fun WinnerConfetti(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "winner-confetti")

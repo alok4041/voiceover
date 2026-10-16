@@ -268,6 +268,7 @@ object VoiceSessionManager {
         }
     }
 
+    /** Selects standard processing or lazily initializes and installs the Krisp capture processor. */
     private suspend fun applyMicNoiseMode(context: Context, currentRoom: Room, mode: MicNoiseMode) {
         val controller = currentRoom.audioProcessingController
         when (mode) {
@@ -319,6 +320,7 @@ object VoiceSessionManager {
         scope.launch { disconnectNow() }
     }
 
+    /** Cancels room events, disconnects LiveKit, and clears participant and session state. */
     private suspend fun disconnectNow() {
         eventsJob?.cancel()
         eventsJob = null
