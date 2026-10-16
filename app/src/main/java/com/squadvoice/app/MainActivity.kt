@@ -17,10 +17,20 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,7 +79,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -88,6 +103,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -99,36 +115,59 @@ class MainActivity : ComponentActivity() {
         val initialDarkMode = preferences.getBoolean("dark_mode", true)
         val initialAccentTheme = preferences.getString("accent_theme", "teal") ?: "teal"
         val initialMicNoiseMode = MicNoiseMode.fromPreferences(preferences)
-        applySystemBarTheme(initialDarkMode)
+        applySystemBarTheme(true)
         setContent {
             var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
             var accentTheme by rememberSaveable {
                 mutableStateOf(preferences.getString("accent_theme", initialAccentTheme) ?: initialAccentTheme)
             }
             var micNoiseMode by rememberSaveable { mutableStateOf(initialMicNoiseMode) }
+            var showSplash by rememberSaveable { mutableStateOf(true) }
+            var splashAlpha by remember { mutableStateOf(1f) }
+            LaunchedEffect(showSplash) {
+                if (showSplash) {
+                    delay(1_320)
+                    for (frame in 1..12) {
+                        splashAlpha = 1f - frame / 12f
+                        delay(15)
+                    }
+                    showSplash = false
+                } else {
+                    this@MainActivity.applySystemBarTheme(darkMode)
+                }
+            }
             SquadVoiceTheme(darkMode, accentTheme) {
-                SquadVoiceApp(
-                    darkMode = darkMode,
-                    accentTheme = accentTheme,
-                    micNoiseMode = micNoiseMode,
-                    onSetDarkMode = { selectedDarkMode ->
-                        darkMode = selectedDarkMode
-                        preferences.edit().putBoolean("dark_mode", darkMode).apply()
-                        applySystemBarTheme(darkMode)
-                    },
-                    onSelectAccentTheme = { selectedTheme ->
-                        accentTheme = selectedTheme
-                        preferences.edit().putString("accent_theme", selectedTheme).apply()
-                    },
-                    onSetMicNoiseMode = { selectedMode ->
-                        micNoiseMode = selectedMode
-                        preferences.edit()
-                            .putString(MIC_NOISE_MODE_PREFERENCE, selectedMode.preferenceValue)
-                            .putBoolean(LEGACY_NOISE_CANCELLATION_PREFERENCE, selectedMode != MicNoiseMode.NORMAL)
-                            .apply()
-                        VoiceSessionManager.setMicNoiseMode(this@MainActivity, selectedMode)
-                    },
-                )
+                Box(Modifier.fillMaxSize()) {
+                    SquadVoiceApp(
+                        darkMode = darkMode,
+                        accentTheme = accentTheme,
+                        micNoiseMode = micNoiseMode,
+                        onSetDarkMode = { selectedDarkMode ->
+                            darkMode = selectedDarkMode
+                            preferences.edit().putBoolean("dark_mode", darkMode).apply()
+                            applySystemBarTheme(darkMode)
+                        },
+                        onSelectAccentTheme = { selectedTheme ->
+                            accentTheme = selectedTheme
+                            preferences.edit().putString("accent_theme", selectedTheme).apply()
+                        },
+                        onSetMicNoiseMode = { selectedMode ->
+                            micNoiseMode = selectedMode
+                            preferences.edit()
+                                .putString(MIC_NOISE_MODE_PREFERENCE, selectedMode.preferenceValue)
+                                .putBoolean(LEGACY_NOISE_CANCELLATION_PREFERENCE, selectedMode != MicNoiseMode.NORMAL)
+                                .apply()
+                            VoiceSessionManager.setMicNoiseMode(this@MainActivity, selectedMode)
+                        },
+                    )
+                    if (showSplash) {
+                        SquadVoiceSplashScreen(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = splashAlpha },
+                        )
+                    }
+                }
             }
         }
     }
@@ -251,6 +290,145 @@ private fun SquadVoiceTheme(
         },
         content = content,
     )
+}
+
+@Composable
+private fun SquadVoiceSplashScreen(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "squadvoice-splash")
+    val logoScale by transition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 780, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "splash-logo-pulse",
+    )
+    val ringPhase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_250, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "splash-rings",
+    )
+    val progress = remember { Animatable(0.08f) }
+    LaunchedEffect(progress) {
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 1_350, easing = FastOutSlowInEasing),
+        )
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = modifier
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(Color(0xFF103632).copy(alpha = 0.62f), Color(0xFF0A1012)),
+                ),
+            )
+            .clickable(interactionSource = interactionSource, indication = null) {},
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier.size(244.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val baseRadius = size.minDimension * 0.27f
+                    val spread = size.minDimension * 0.19f
+                    drawCircle(
+                        color = Color(0xFF55E2C8).copy(alpha = (1f - ringPhase) * 0.36f),
+                        radius = baseRadius + spread * ringPhase,
+                        style = Stroke(width = 1.4.dp.toPx()),
+                    )
+                    val secondPhase = (ringPhase + 0.5f) % 1f
+                    drawCircle(
+                        color = Color(0xFF55E2C8).copy(alpha = (1f - secondPhase) * 0.28f),
+                        radius = baseRadius + spread * secondPhase,
+                        style = Stroke(width = 1.2.dp.toPx()),
+                    )
+                }
+                Image(
+                    painter = painterResource(R.drawable.squadvoice_splash_art),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(142.dp).scale(logoScale),
+                )
+            }
+            Text(
+                text = "SQUADVOICE",
+                color = Color(0xFFE4ECEC),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 3.sp,
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                text = "VOICE FOR YOUR SQUAD",
+                color = Color(0xFF9AAEAF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.4.sp,
+            )
+            Spacer(Modifier.height(42.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                repeat(7) { index ->
+                    val height by transition.animateFloat(
+                        initialValue = 8f,
+                        targetValue = 27f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(
+                                durationMillis = 400 + index * 60,
+                                delayMillis = index * 35,
+                                easing = FastOutSlowInEasing,
+                            ),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "splash-wave-$index",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(height.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF55E2C8)),
+                    )
+                }
+            }
+            Spacer(Modifier.height(27.dp))
+            Text(
+                text = "Getting your squad ready",
+                color = Color(0xFF9AAEAF),
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(54.dp))
+            Box(
+                modifier = Modifier
+                    .width(104.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0xFF183637)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.value)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFF55E2C8)),
+                )
+            }
+        }
+    }
 }
 
 @Composable
