@@ -15,11 +15,11 @@ Last reviewed: 2026-10-16 (Asia/Kolkata). Recheck the live site and service befo
 
 The website reads published GitHub Releases to list APK versions and download links. The Android update checker reads the latest GitHub Release. The web page also has a saved fallback release card in case GitHub's release API is unavailable. The root `index.html` is used for GitHub Pages; `token-server/public/index.html` is a copy served by Express. Keep the copies aligned if changing the website.
 
-The Android app is at version `1.1.9`, `versionCode` 11. Check GitHub Releases before telling users which APK is newest; the website and in-app checker use the public Releases API.
+The Android app is at version `1.2.1`, `versionCode` 13. Check GitHub Releases before telling users which APK is newest; the website and in-app checker use the public Releases API.
 
 ## What the app does
 
-SquadVoice is an Android voice-room app for gaming groups. People create a room and share a six-character code; teammates join with that code and talk over LiveKit/WebRTC. It includes room/participant UI, microphone controls, an Android foreground service and persistent room notification, optional game overlay controls, per-participant playback volume, day/night appearance, accent themes, per-device Normal/Krisp/DeepFilterNet microphone filter selection, app update checking, and an About section.
+SquadVoice is an Android voice-room app for gaming groups. People create a room and share a six-character code; teammates join with that code and talk over LiveKit/WebRTC. It includes room/participant UI, microphone controls, an Android foreground service and persistent room notification, optional game overlay controls, per-participant playback volume, day/night appearance, accent themes, per-device Normal/Krisp microphone filter selection, app update checking, and an About section.
 
 Voice is sent from the phone microphone. The app does not capture or transmit game audio. Audio routing and whether a particular game shares the microphone are controlled by Android, the device manufacturer, and the game.
 
@@ -29,7 +29,6 @@ Voice is sent from the phone microphone. The app does not capture or transmit ga
 - `app/src/main/java/com/squadvoice/app/MainActivity.kt` — screens, settings, user interactions, and theme.
 - `app/src/main/java/com/squadvoice/app/VoiceSessionManager.kt` — LiveKit room lifecycle, participants, microphone state, and per-person output volume.
 - `app/src/main/java/com/squadvoice/app/MicNoiseMode.kt` — saved microphone filter choice and compatibility with the earlier Boolean preference.
-- `app/src/main/java/com/squadvoice/app/DeepFilterNetCaptureProcessor.kt` — adapter for DeepFilterNet's bundled Android model and LiveKit microphone processing.
 - `app/src/main/java/com/squadvoice/app/AppUpdateChecker.kt` — looks up the latest public GitHub Release for the in-app update prompt.
 - `app/build.gradle.kts` — Android SDK, app version, LiveKit dependency, and token-server URL build setting.
 - `token-server/` — Node.js/Express API that creates rooms and issues short-lived LiveKit participant tokens.
@@ -74,7 +73,7 @@ adb reverse tcp:3000 tcp:3000
 ./gradlew :app:assembleDebug -PTOKEN_SERVER_URL=http://127.0.0.1:3000
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The local `build/` output is ignored by Git. The APK currently packages `arm64-v8a` and `armeabi-v7a`; x86 Android emulators are excluded to keep the bundled DeepFilterNet libraries from making the shared APK unnecessarily large. The last local build was about 72 MB. Do not remove these ABI filters without checking the APK size and intended devices. Do not install it on the user's connected phone or interrupt a live room without the user's direct approval.
+The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The local `build/` output is ignored by Git. The APK currently packages `arm64-v8a` and `armeabi-v7a`; x86 Android emulators are excluded to keep the shared APK focused on Android phones. Do not remove these ABI filters without checking the APK size and intended devices. Do not install it on the user's connected phone or interrupt a live room without the user's direct approval.
 
 For local build checks, use `./gradlew :app:compileDebugKotlin` or `./gradlew :app:assembleDebug`. Do not add or run tests unless the user asks. A successful build does not prove real-device audio behavior; test room join, leaving, notification actions, and audio with consent on target phones before publishing.
 
@@ -131,7 +130,7 @@ Keep the APK out of Git history. Do not install a release on a connected phone u
 Before a new app release:
 
 1. Finish the requested code changes and review `git diff`.
-2. Increase both `versionCode` and `versionName` in `app/build.gradle.kts`. Never reuse a `versionCode` for a published build. Use a matching Git tag such as `v1.1.9` for version `1.1.9`.
+2. Increase both `versionCode` and `versionName` in `app/build.gradle.kts`. Never reuse a `versionCode` for a published build. Use a matching Git tag such as `v1.2.1` for version `1.2.1`.
 3. Build the APK with the intended production token URL and verify the generated artifact. Current default URL is the Render API listed above.
 4. Preserve the APK signing identity between updates. Replacing or losing the signing key can prevent an in-place update; users may have to uninstall first, which can erase app data. The current shared APK flow has used the debug APK, which is for direct testing and is not a Google Play release. Do not casually switch signing keys or claim Play Store readiness. The shared APK currently targets ARM phones, not x86 Android emulators.
 5. Create a GitHub Release for the matching tag and attach the APK using the expected filename `app-debug.apk`; write clear notes and label a preview as pre-release where appropriate.

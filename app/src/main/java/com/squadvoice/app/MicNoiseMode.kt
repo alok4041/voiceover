@@ -16,13 +16,7 @@ internal enum class MicNoiseMode(
         preferenceValue = "krisp",
         title = "Krisp",
         description = "Enhanced removal of steady background sounds such as a TV or fan.",
-    ),
-    DEEP_FILTER_NET(
-        preferenceValue = "deepfilternet",
-        title = "DeepFilterNet",
-        description = "On-device AI filter; it uses more CPU and battery and makes the app download larger.",
-    ),
-    ;
+    );
 
     companion object {
         fun fromPreferences(preferences: SharedPreferences): MicNoiseMode {
