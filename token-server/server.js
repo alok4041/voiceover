@@ -25,6 +25,22 @@ const livekit = new LiveKitAPI({
   secret: process.env.LIVEKIT_API_SECRET,
 });
 
+// Looks up a room in memory first. If the server slept or restarted (memory is
+// empty), ask LiveKit whether the room is still live and restore it.
+async function findRoom(code) {
+  const cached = rooms.get(code);
+  if (cached && Date.now() - cached.createdAt <= roomCodeLifetimeMs) return cached;
+  rooms.delete(code);
+
+  const found = await livekit.room.listRooms([code]);
+  const liveRoom = Array.isArray(found) ? found[0] : found?.rooms?.[0];
+  if (!liveRoom) return null;
+
+  const restored = { roomName: liveRoom.metadata || code, createdAt: Date.now() };
+  rooms.set(code, restored);
+  return restored;
+}
+
 const roomCodeCleanup = setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
@@ -52,6 +68,7 @@ app.post('/rooms/create', async (request, response) => {
       name: code,
       emptyTimeout: 300,
       maxParticipants: maximumParticipants,
+      metadata: roomName,
     });
     rooms.set(code, { roomName, createdAt: Date.now() });
     const participantToken = await createParticipantToken(code, userName);
@@ -77,13 +94,11 @@ app.post('/rooms/join', async (request, response) => {
     return response.status(400).json({ error: 'Enter your name before joining.' });
   }
 
-  const room = rooms.get(code);
-  if (!room || Date.now() - room.createdAt > roomCodeLifetimeMs) {
-    rooms.delete(code);
-    return response.status(404).json({ error: 'Room not found. Check the code and try again.' });
-  }
-
   try {
+    const room = await findRoom(code);
+    if (!room) {
+      return response.status(404).json({ error: 'Room not found. Check the code and try again.' });
+    }
     const participantToken = await createParticipantToken(code, userName);
     return response.json({
       code,
@@ -139,3 +154,4 @@ function readText(value, maximumLength) {
   if (typeof value !== 'string') return '';
   return value.trim().slice(0, maximumLength);
 }
+
