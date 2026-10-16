@@ -1,0 +1,6 @@
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/squadvoice_splash_loader">
+    <target
+        android:name="moving_segment"
+        android:animation="@animator/squadvoice_splash_loader_motion" />
+</animated-vector>

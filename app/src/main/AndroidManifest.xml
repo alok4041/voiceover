@@ -16,6 +16,7 @@
         android:usesCleartextTraffic="${allowCleartextTraffic}">
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -24,11 +25,11 @@
         </activity>
 
         <service
-            android:name=".VoiceRoomService"
+            android:name=".voice.VoiceRoomService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
         <service
-            android:name=".OverlayControlsService"
+            android:name=".voice.OverlayControlsService"
             android:exported="false" />
     </application>
 </manifest>

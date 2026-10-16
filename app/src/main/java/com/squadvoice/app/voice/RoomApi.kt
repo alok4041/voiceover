@@ -1,8 +1,9 @@
-package com.squadvoice.app
+package com.squadvoice.app.voice
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import com.squadvoice.app.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 

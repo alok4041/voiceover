@@ -1,11 +1,25 @@
 package com.squadvoice.app
 
+import com.squadvoice.app.game.RopeboundApi
+import com.squadvoice.app.game.RopeboundGameScreen
+import com.squadvoice.app.voice.LEGACY_NOISE_CANCELLATION_PREFERENCE
+import com.squadvoice.app.voice.MIC_NOISE_MODE_PREFERENCE
+import com.squadvoice.app.voice.MicNoiseMode
+import com.squadvoice.app.voice.OverlayControlsService
+import com.squadvoice.app.voice.RoomApi
+import com.squadvoice.app.voice.RoomCredentials
+import com.squadvoice.app.voice.VoiceRoomService
+import com.squadvoice.app.voice.VoiceRoomScreen
+import com.squadvoice.app.voice.VoiceSessionManager
+
 import android.Manifest
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ActivityInfo
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -17,20 +31,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,10 +92,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -104,9 +110,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.withFrameNanos
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -124,18 +130,11 @@ class MainActivity : ComponentActivity() {
             }
             var micNoiseMode by rememberSaveable { mutableStateOf(initialMicNoiseMode) }
             var showSplash by rememberSaveable { mutableStateOf(true) }
-            var splashAlpha by remember { mutableStateOf(1f) }
-            LaunchedEffect(showSplash) {
-                if (showSplash) {
-                    delay(1_320)
-                    for (frame in 1..12) {
-                        splashAlpha = 1f - frame / 12f
-                        delay(15)
-                    }
-                    showSplash = false
-                } else {
-                    this@MainActivity.applySystemBarTheme(darkMode)
-                }
+            LaunchedEffect(Unit) {
+                // Keep the loader up until Compose has produced the home screen's first frame.
+                withFrameNanos { }
+                showSplash = false
+                this@MainActivity.applySystemBarTheme(darkMode)
             }
             SquadVoiceTheme(darkMode, accentTheme) {
                 Box(Modifier.fillMaxSize()) {
@@ -162,11 +161,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                     if (showSplash) {
-                        SquadVoiceSplashScreen(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { alpha = splashAlpha },
-                        )
+                        SquadVoiceSplashScreen(Modifier.fillMaxSize())
                     }
                 }
             }
@@ -296,138 +291,46 @@ private fun SquadVoiceTheme(
 @Composable
 private fun SquadVoiceSplashScreen(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "squadvoice-splash")
-    val logoScale by transition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 780, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "splash-logo-pulse",
-    )
-    val ringPhase by transition.animateFloat(
+    val sliderPosition by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_250, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 1_100, easing = androidx.compose.animation.core.LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
-        label = "splash-rings",
+        label = "splash-slider",
     )
-    val progress = remember { Animatable(0.08f) }
-    LaunchedEffect(progress) {
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 1_350, easing = FastOutSlowInEasing),
-        )
-    }
-    val interactionSource = remember { MutableInteractionSource() }
 
     Box(
         modifier = modifier
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(Color(0xFF103632).copy(alpha = 0.62f), Color(0xFF0A1012)),
-                ),
-            )
-            .clickable(interactionSource = interactionSource, indication = null) {},
-        contentAlignment = Alignment.Center,
+            .background(Color(0xFF0A1012)),
+        contentAlignment = Alignment.BottomCenter,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
         ) {
-            Box(
-                modifier = Modifier.size(244.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val baseRadius = size.minDimension * 0.27f
-                    val spread = size.minDimension * 0.19f
-                    drawCircle(
-                        color = Color(0xFF55E2C8).copy(alpha = (1f - ringPhase) * 0.36f),
-                        radius = baseRadius + spread * ringPhase,
-                        style = Stroke(width = 1.4.dp.toPx()),
-                    )
-                    val secondPhase = (ringPhase + 0.5f) % 1f
-                    drawCircle(
-                        color = Color(0xFF55E2C8).copy(alpha = (1f - secondPhase) * 0.28f),
-                        radius = baseRadius + spread * secondPhase,
-                        style = Stroke(width = 1.2.dp.toPx()),
-                    )
-                }
-                Image(
-                    painter = painterResource(R.drawable.squadvoice_splash_art),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(142.dp).scale(logoScale),
-                )
-            }
-            Text(
-                text = "SQUADVOICE",
-                color = Color(0xFFE4ECEC),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 3.sp,
+            val trackWidth = 132.dp.toPx()
+            val segmentWidth = 38.dp.toPx()
+            val trackHeight = 4.dp.toPx()
+            val left = (size.width - trackWidth) / 2f
+            val top = (size.height - trackHeight) / 2f
+            drawRoundRect(
+                color = Color(0xFF23413D),
+                topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(trackWidth, trackHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
             )
-            Spacer(Modifier.height(7.dp))
-            Text(
-                text = "VOICE FOR YOUR SQUAD",
-                color = Color(0xFF9AAEAF),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.4.sp,
+            drawRoundRect(
+                color = Color(0xFF55E2C8),
+                topLeft = androidx.compose.ui.geometry.Offset(
+                    left + (trackWidth - segmentWidth) * sliderPosition,
+                    top,
+                ),
+                size = androidx.compose.ui.geometry.Size(segmentWidth, trackHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
             )
-            Spacer(Modifier.height(42.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                repeat(7) { index ->
-                    val height by transition.animateFloat(
-                        initialValue = 8f,
-                        targetValue = 27f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(
-                                durationMillis = 400 + index * 60,
-                                delayMillis = index * 35,
-                                easing = FastOutSlowInEasing,
-                            ),
-                            repeatMode = RepeatMode.Reverse,
-                        ),
-                        label = "splash-wave-$index",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .width(4.dp)
-                            .height(height.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF55E2C8)),
-                    )
-                }
-            }
-            Spacer(Modifier.height(27.dp))
-            Text(
-                text = "Getting your squad ready",
-                color = Color(0xFF9AAEAF),
-                fontSize = 12.sp,
-            )
-            Spacer(Modifier.height(54.dp))
-            Box(
-                modifier = Modifier
-                    .width(104.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0xFF183637)),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress.value)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color(0xFF55E2C8)),
-                )
-            }
         }
     }
 }
@@ -478,7 +381,21 @@ private fun SquadVoiceApp(
     var overlayEnabled by remember { mutableStateOf(OverlayControlsService.isRunning) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showRopeboundGame by rememberSaveable { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<LatestApkRelease?>(null) }
+
+    DisposableEffect(context, showRopeboundGame) {
+        val activity = context as? Activity
+        val previousOrientation = activity?.requestedOrientation
+        if (showRopeboundGame && activity != null) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        onDispose {
+            if (showRopeboundGame && activity != null && previousOrientation != null) {
+                activity.requestedOrientation = previousOrientation
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -490,8 +407,18 @@ private fun SquadVoiceApp(
         }
     }
 
-    BackHandler(enabled = showSettings) {
-        showSettings = false
+    fun closeRopeboundGame() {
+        val room = activeRoom
+        showRopeboundGame = false
+        if (room != null) {
+            coroutineScope.launch {
+                runCatching { RopeboundApi().leave(room.code, room.participantToken) }
+            }
+        }
+    }
+
+    BackHandler(enabled = showSettings || showRopeboundGame) {
+        if (showSettings) showSettings = false else closeRopeboundGame()
     }
 
     DisposableEffect(preferences) {
@@ -502,6 +429,7 @@ private fun SquadVoiceApp(
                 savedServerUrl = null
                 savedParticipantToken = null
                 isInRoom = false
+                showRopeboundGame = false
                 overlayEnabled = false
                 pushToTalk = false
                 OverlayControlsService.stop(context)
@@ -680,7 +608,15 @@ private fun SquadVoiceApp(
                 onBack = { showSettings = false },
             )
         } else if (isInRoom && activeRoom != null) {
-            RoomScreen(
+            if (showRopeboundGame) {
+                RopeboundGameScreen(
+                    roomCode = activeRoom.code,
+                    participantToken = activeRoom.participantToken,
+                    microphoneEnabled = session.micEnabled,
+                    onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
+                    onBack = ::closeRopeboundGame,
+                )
+            } else VoiceRoomScreen(
                 room = activeRoom,
                 session = session,
                 errorMessage = errorMessage ?: session.errorMessage,
@@ -694,6 +630,7 @@ private fun SquadVoiceApp(
                 pushToTalk = pushToTalk,
                 overlayEnabled = overlayEnabled,
                 onOpenSettings = { showSettings = true },
+                onPlayRopebound = { showRopeboundGame = true },
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onSetParticipantVolume = { identity, volumePercent ->
@@ -737,6 +674,7 @@ private fun SquadVoiceApp(
                     savedServerUrl = null
                     savedParticipantToken = null
                     isInRoom = false
+                    showRopeboundGame = false
                     overlayEnabled = false
                     pushToTalk = false
                     errorMessage = null
@@ -1399,349 +1337,6 @@ private fun ProfileLinkIcon(
 
 private fun openExternalLink(context: Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-}
-
-@Composable
-private fun RoomScreen(
-    room: RoomCredentials,
-    session: VoiceSessionState,
-    errorMessage: String?,
-    onReconnect: () -> Unit,
-    pushToTalk: Boolean,
-    overlayEnabled: Boolean,
-    onOpenSettings: () -> Unit,
-    onToggleMicrophone: () -> Unit,
-    onSetMicrophone: (Boolean) -> Unit,
-    onSetParticipantVolume: (String, Int) -> Unit,
-    onTogglePushToTalk: (Boolean) -> Unit,
-    onCopyCode: () -> Unit,
-    onShareCode: () -> Unit,
-    onToggleOverlay: () -> Unit,
-    onLeave: () -> Unit,
-) {
-    var expandedVolumeIdentity by remember(room.code) { mutableStateOf<String?>(null) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text("VOICE ROOM", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
-                Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.weight(1f))
-            TextButtonLabel("⚙", onOpenSettings, accessibilityLabel = "Open settings")
-            Button(
-                onClick = onLeave,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = Alert,
-                ),
-                shape = RoundedCornerShape(14.dp),
-            ) { Text("Leave") }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(Panel)
-                .padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("ROOM CODE", fontSize = 10.sp, color = MutedText, letterSpacing = 1.4.sp)
-                Spacer(Modifier.height(4.dp))
-                Text(room.code, fontSize = 27.sp, color = Mint, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
-            }
-            Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                TextButtonLabel("Copy", onCopyCode)
-                Spacer(Modifier.height(8.dp))
-                TextButtonLabel("Share", onShareCode)
-            }
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("PLAYERS", fontSize = 11.sp, color = MutedText, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            Text("${session.participants.size.coerceAtMost(10)} / 10", color = MutedText, fontSize = 12.sp)
-        }
-
-        Surface(shape = RoundedCornerShape(22.dp), color = Panel) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                if (session.participants.isEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 17.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(17.dp), strokeWidth = 2.dp, color = Mint)
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            if (session.isConnecting) "Connecting to voice…" else "Waiting for players…",
-                            color = MutedText,
-                            fontSize = 14.sp,
-                        )
-                    }
-                } else {
-                    session.participants.forEachIndexed { index, participant ->
-                        ParticipantRow(
-                            participant = participant,
-                            volumeExpanded = !participant.isLocal && expandedVolumeIdentity == participant.identity,
-                            onToggleVolume = {
-                                expandedVolumeIdentity =
-                                    if (expandedVolumeIdentity == participant.identity) null else participant.identity
-                            },
-                            onVolumeChange = { percent -> onSetParticipantVolume(participant.identity, percent) },
-                        )
-                        if (index != session.participants.lastIndex) {
-                            Spacer(Modifier.height(1.dp))
-                            Box(Modifier.fillMaxWidth().height(1.dp).background(RaisedPanel))
-                        }
-                    }
-                }
-            }
-        }
-
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            MicControl(
-                micEnabled = session.micEnabled,
-                pushToTalk = pushToTalk,
-                enabled = session.isConnected,
-                isConnecting = session.isConnecting,
-                onToggle = onToggleMicrophone,
-                onSetMicrophone = onSetMicrophone,
-            )
-        }
-
-        if (!session.isConnected && !session.isConnecting) {
-            Button(
-                onClick = onReconnect,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                shape = RoundedCornerShape(15.dp),
-            ) { Text("Reconnect to room") }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(Panel)
-                .padding(horizontal = 15.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Hold to talk", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text("Keep the mic open only while pressing", fontSize = 11.sp, color = MutedText)
-            }
-            Switch(checked = pushToTalk, onCheckedChange = onTogglePushToTalk)
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            Surface(
-                modifier = Modifier.weight(1f).height(56.dp),
-                color = RaisedPanel,
-                shape = RoundedCornerShape(15.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text("Game + chat volume", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Use the media volume", fontSize = 10.sp, color = MutedText)
-                }
-            }
-            Button(
-                onClick = onToggleOverlay,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = RaisedPanel,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                ),
-                shape = RoundedCornerShape(15.dp),
-            ) { Text(if (overlayEnabled) "Overlay on" else "Game overlay") }
-        }
-
-        if (errorMessage != null) ErrorNotice(errorMessage)
-
-        Text(
-            "Only your voice goes to the room; footsteps and game sounds stay on your phone. Turn off the game's built-in voice chat, but keep its sound effects on. Wired or USB headphones usually keep game audio clearest.",
-            color = MutedText,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-        )
-    }
-}
-
-@Composable
-private fun MicControl(
-    micEnabled: Boolean,
-    pushToTalk: Boolean,
-    enabled: Boolean,
-    isConnecting: Boolean,
-    onToggle: () -> Unit,
-    onSetMicrophone: (Boolean) -> Unit,
-) {
-    val color = if (micEnabled) Mint else RaisedPanel
-    val textColor = if (micEnabled) Ink else MaterialTheme.colorScheme.onSurface
-    Box(
-        modifier = Modifier
-            .widthIn(max = 280.dp)
-            .fillMaxWidth()
-            .height(118.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(color)
-            .semantics {
-                role = Role.Button
-                contentDescription = if (micEnabled) "Microphone on" else "Microphone muted"
-                if (!pushToTalk) {
-                    onClick(label = "Toggle microphone") {
-                        if (enabled) {
-                            onToggle()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                }
-            }
-            .pointerInput(pushToTalk, enabled, micEnabled) {
-                if (pushToTalk) {
-                    detectTapGestures(onPress = {
-                        if (pushToTalk && enabled) {
-                            onSetMicrophone(true)
-                            tryAwaitRelease()
-                            onSetMicrophone(false)
-                        }
-                    })
-                } else {
-                    detectTapGestures(onTap = { if (enabled) onToggle() })
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(
-                when {
-                    !enabled && isConnecting -> "CONNECTING"
-                    !enabled -> "VOICE OFF"
-                    pushToTalk -> "HOLD TO TALK"
-                    micEnabled -> "MIC IS LIVE"
-                    else -> "TAP TO UNMUTE"
-                },
-                color = textColor,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.sp,
-            )
-            Text(
-                when {
-                    !enabled && isConnecting -> "Joining your squad"
-                    !enabled -> "Tap Reconnect to try again"
-                    pushToTalk -> "Release to mute"
-                    micEnabled -> "Tap to mute your voice"
-                    else -> "Your squad can't hear you yet"
-                },
-                color = if (micEnabled) Ink.copy(alpha = 0.72f) else MutedText,
-                fontSize = 12.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ParticipantRow(
-    participant: ParticipantUi,
-    volumeExpanded: Boolean,
-    onToggleVolume: () -> Unit,
-    onVolumeChange: (Int) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(if (participant.isSpeaking) Mint else RaisedPanel)
-                    .border(2.dp, if (participant.isSpeaking) Mint else Color.Transparent, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(participant.name.firstOrNull()?.uppercase() ?: "?", color = if (participant.isSpeaking) Ink else MutedText, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    if (participant.isLocal) "${participant.name} (you)" else participant.name,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = if (participant.microphoneEnabled) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.errorContainer
-                        },
-                        shape = RoundedCornerShape(7.dp),
-                    ) {
-                        Text(
-                            if (participant.microphoneEnabled) "Mic on" else "Mic muted",
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            color = if (participant.microphoneEnabled) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onErrorContainer
-                            },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        if (participant.isSpeaking) "Speaking" else "In the room",
-                        fontSize = 11.sp,
-                        color = if (participant.isSpeaking) Mint else MutedText,
-                    )
-                }
-            }
-            if (participant.isLocal) {
-                if (participant.isSpeaking) Box(Modifier.size(8.dp).clip(CircleShape).background(Mint))
-            } else {
-                TextButtonLabel("Volume ${participant.volumePercent}%", onToggleVolume)
-            }
-        }
-        if (volumeExpanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 48.dp, top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Only on your phone", fontSize = 11.sp, color = MutedText)
-                Spacer(Modifier.weight(1f))
-                TextButtonLabel("Reset", { onVolumeChange(100) })
-            }
-            Slider(
-                value = participant.volumePercent.toFloat(),
-                onValueChange = { onVolumeChange(it.roundToInt()) },
-                valueRange = 0f..200f,
-                steps = 19,
-                modifier = Modifier.padding(start = 42.dp, end = 4.dp),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 48.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("0% · muted", fontSize = 10.sp, color = MutedText)
-                Spacer(Modifier.weight(1f))
-                Text("100% · normal", fontSize = 10.sp, color = MutedText)
-                Spacer(Modifier.weight(1f))
-                Text("200% · boost", fontSize = 10.sp, color = MutedText)
-            }
-        }
-    }
 }
 
 @Composable

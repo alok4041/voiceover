@@ -1,4 +1,6 @@
-package com.squadvoice.app
+package com.squadvoice.app.voice
+
+import com.squadvoice.app.R
 
 import android.app.Service
 import android.content.Context

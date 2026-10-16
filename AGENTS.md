@@ -15,7 +15,7 @@ Last reviewed: 2026-10-16 (Asia/Kolkata). Recheck the live site and service befo
 
 The website reads published GitHub Releases to list APK versions and download links. The Android update checker reads the latest GitHub Release. The web page also has a saved fallback release card in case GitHub's release API is unavailable. The root `index.html` is used for GitHub Pages; `token-server/public/index.html` is a copy served by Express. Keep the copies aligned if changing the website.
 
-The Android app is at version `1.2.1`, `versionCode` 13. Check GitHub Releases before telling users which APK is newest; the website and in-app checker use the public Releases API.
+The current source prepares Android app version `1.2.2`, `versionCode` 14. This source version is not necessarily a published release; check GitHub Releases before telling users which APK is newest. The website and in-app checker use the public Releases API.
 
 ## What the app does
 
@@ -27,17 +27,19 @@ Voice is sent from the phone microphone. The app does not capture or transmit ga
 
 - `app/` — Kotlin Android app, Jetpack Compose interface, LiveKit client, room/session management, foreground service, and overlay.
 - `app/src/main/java/com/squadvoice/app/MainActivity.kt` — screens, settings, user interactions, and theme.
-- `app/src/main/java/com/squadvoice/app/VoiceSessionManager.kt` — LiveKit room lifecycle, participants, microphone state, and per-person output volume.
-- `app/src/main/java/com/squadvoice/app/MicNoiseMode.kt` — saved microphone filter choice and compatibility with the earlier Boolean preference.
+- `app/src/main/java/com/squadvoice/app/game/` — Ropebound Android UI, client, state models, controls, and player identity helper. The game is a separate feature package inside the same Android app module.
+- `app/src/main/java/com/squadvoice/app/voice/` — voice-room UI, LiveKit session manager and models, foreground room/overlay services, room API, and microphone filter selection.
+- `app/src/main/java/com/squadvoice/app/MainActivity.kt` — app shell, navigation, settings, and game/voice screen selection. The LiveKit session manager and foreground service remain alive while the game screen is visible, so the teammate voice room continues at the same time.
 - `app/src/main/java/com/squadvoice/app/AppUpdateChecker.kt` — looks up the latest public GitHub Release for the in-app update prompt.
 - `app/build.gradle.kts` — Android SDK, app version, LiveKit dependency, and token-server URL build setting.
 - `token-server/` — Node.js/Express API that creates rooms and issues short-lived LiveKit participant tokens.
-- `token-server/server.js` — API routes and token generation. `/health` is a simple public health route; `/rooms/create` and `/rooms/join` handle room creation and joining.
+- `token-server/server.js` — voice-room API routes, token generation, shared middleware, and Express app startup. `/health` is a simple public health route; `/rooms/create` and `/rooms/join` handle voice-room creation and joining.
+- `token-server/ropebound/` — separated Ropebound server feature: `game-core.js` holds authoritative lobby/physics rules and `routes.js` mounts the authenticated `/games/*` API and SSE state delivery. The game and voice-room APIs share the same server process but keep their route and feature logic separate.
 - `token-server/.env.example` — placeholder names for local configuration. It must contain no real keys.
 - `index.html` — GitHub Pages download website and release list.
 - `token-server/public/index.html` — duplicate static page served by the Render service.
 - `assets/squadvoice-app-icon.png` — app/site artwork.
-- `docs/ropebound-game-design.md` — separate game design proposal; it is not part of the voice-room app runtime.
+- `docs/ropebound-design.md` — Ropebound game design and future implementation reference; it is not part of the voice-room app runtime.
 
 The server holds room-code metadata in memory for up to 12 hours. A server restart clears that map, so outstanding codes stop working. LiveKit rooms are configured with a 5-minute empty timeout and a maximum of 10 participants. The API does not currently provide accounts or durable room storage. Do not promise that rooms or codes survive a server restart.
 

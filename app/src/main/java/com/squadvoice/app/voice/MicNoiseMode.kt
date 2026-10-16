@@ -1,4 +1,4 @@
-package com.squadvoice.app
+package com.squadvoice.app.voice
 
 import android.content.SharedPreferences
 
