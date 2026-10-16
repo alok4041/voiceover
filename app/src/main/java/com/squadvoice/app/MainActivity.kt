@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
@@ -477,6 +478,17 @@ private fun SquadVoiceApp(
     var overlayEnabled by remember { mutableStateOf(OverlayControlsService.isRunning) }
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<LatestApkRelease?>(null) }
+
+    LaunchedEffect(Unit) {
+        runCatching {
+            AppUpdateChecker.fetchLatestApk()
+        }.onSuccess { latest ->
+            if (compareVersions(latest.version, BuildConfig.VERSION_NAME) > 0) {
+                availableUpdate = latest
+            }
+        }
+    }
 
     BackHandler(enabled = showSettings) {
         showSettings = false
@@ -737,6 +749,10 @@ private fun SquadVoiceApp(
                 joinCode = joinCode,
                 isLoading = isLoading,
                 errorMessage = errorMessage,
+                availableUpdate = availableUpdate,
+                onDownloadUpdate = {
+                    availableUpdate?.let { update -> openExternalLink(context, update.downloadUrl) }
+                },
                 onOpenSettings = { showSettings = true },
                 onPlayerNameChange = {
                     playerName = it
@@ -774,6 +790,8 @@ private fun HomeScreen(
     joinCode: String,
     isLoading: Boolean,
     errorMessage: String?,
+    availableUpdate: LatestApkRelease?,
+    onDownloadUpdate: () -> Unit,
     onOpenSettings: () -> Unit,
     onPlayerNameChange: (String) -> Unit,
     onRoomNameChange: (String) -> Unit,
@@ -819,6 +837,29 @@ private fun HomeScreen(
                 fontSize = 15.sp,
                 lineHeight = 22.sp,
             )
+        }
+
+        availableUpdate?.let { update ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("🎉 Great news! A new update is here", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "SquadVoice v${update.version} is ready for you.",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                        fontSize = 13.sp,
+                    )
+                    Button(onClick = onDownloadUpdate, modifier = Modifier.fillMaxWidth()) {
+                        Text("Download v${update.version}")
+                    }
+                }
+            }
         }
 
         OutlinedTextField(
@@ -1466,14 +1507,16 @@ private fun RoomScreen(
             }
         }
 
-        MicControl(
-            micEnabled = session.micEnabled,
-            pushToTalk = pushToTalk,
-            enabled = session.isConnected,
-            isConnecting = session.isConnecting,
-            onToggle = onToggleMicrophone,
-            onSetMicrophone = onSetMicrophone,
-        )
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            MicControl(
+                micEnabled = session.micEnabled,
+                pushToTalk = pushToTalk,
+                enabled = session.isConnected,
+                isConnecting = session.isConnecting,
+                onToggle = onToggleMicrophone,
+                onSetMicrophone = onSetMicrophone,
+            )
+        }
 
         if (!session.isConnected && !session.isConnecting) {
             Button(
@@ -1547,6 +1590,7 @@ private fun MicControl(
     val textColor = if (micEnabled) Ink else MaterialTheme.colorScheme.onSurface
     Box(
         modifier = Modifier
+            .widthIn(max = 280.dp)
             .fillMaxWidth()
             .height(118.dp)
             .clip(RoundedCornerShape(28.dp))
