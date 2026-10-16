@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M62,144 H226"
+        android:strokeColor="#23413D"
+        android:strokeLineCap="round"
+        android:strokeWidth="6" />
+    <group
+        android:name="moving_segment"
+        android:translateX="0">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:pathData="M62,144 H102"
+            android:strokeColor="#55E2C8"
+            android:strokeLineCap="round"
+            android:strokeWidth="6" />
+    </group>
+</vector>

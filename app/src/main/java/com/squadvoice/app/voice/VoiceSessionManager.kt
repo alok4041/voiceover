@@ -1,4 +1,4 @@
-package com.squadvoice.app
+package com.squadvoice.app.voice
 
 import android.content.Context
 import android.media.AudioAttributes
@@ -18,7 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -63,7 +62,6 @@ object VoiceSessionManager {
     private val noiseProcessorMutex = Mutex()
     private val noiseSettingsMutex = Mutex()
     private var krispProcessor: KrispAudioProcessor? = null
-    private var deepFilterNetProcessor: DeepFilterNetCaptureProcessor? = null
 
     fun connect(context: Context, credentials: RoomCredentials, participantName: String) {
         scope.launch {
@@ -289,30 +287,6 @@ object VoiceSessionManager {
                 controller.capturePostProcessor = processor
                 controller.bypassCapturePostProcessing = false
             }
-
-            MicNoiseMode.DEEP_FILTER_NET -> {
-                val processor = noiseProcessorMutex.withLock {
-                    deepFilterNetProcessor?.takeIf { it.hasFailed }?.release()
-                    deepFilterNetProcessor?.takeUnless { it.hasFailed }
-                        ?: DeepFilterNetCaptureProcessor.create(context.applicationContext) { message ->
-                            scope.launch {
-                                while (room === currentRoom && mutableState.value.isConnecting) delay(100)
-                                if (room === currentRoom) {
-                                    currentRoom.audioProcessingController.bypassCapturePostProcessing = true
-                                    currentRoom.audioProcessingController.capturePostProcessor = null
-                                    mutableState.update {
-                                        it.copy(
-                                            noiseCancellationActive = false,
-                                            noiseCancellationMessage = message,
-                                        )
-                                    }
-                                }
-                            }
-                        }.also { deepFilterNetProcessor = it }
-                }
-                controller.capturePostProcessor = processor
-                controller.bypassCapturePostProcessing = false
-            }
         }
     }
 
@@ -354,10 +328,6 @@ object VoiceSessionManager {
         localIdentity = ""
         participantVolumePercent.clear()
         runCatching { oldRoom?.disconnect() }
-        val oldDeepFilter = noiseProcessorMutex.withLock {
-            deepFilterNetProcessor.also { deepFilterNetProcessor = null }
-        }
-        runCatching { withContext(Dispatchers.IO) { oldDeepFilter?.release() } }
         mutableState.value = VoiceSessionState()
     }
 

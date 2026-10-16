@@ -1,4 +1,4 @@
-package com.squadvoice.app
+package com.squadvoice.app.voice
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,6 +20,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import com.squadvoice.app.MainActivity
+import com.squadvoice.app.R
 
 class VoiceRoomService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
