@@ -15,8 +15,8 @@ android {
         applicationId = "com.squadvoice.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.1.9"
+        versionCode = 12
+        versionName = "1.2.0"
         buildConfigField("String", "TOKEN_SERVER_URL", "\"$tokenServerUrl\"")
 
         // The shared APK is for Android phones; excluding desktop emulator ABIs
