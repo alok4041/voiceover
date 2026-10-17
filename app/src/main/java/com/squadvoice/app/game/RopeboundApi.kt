@@ -180,7 +180,12 @@ internal class RopeboundApi(
             "/games/input",
             roomCode,
             participantToken,
-            JSONObject().put("seq", seq).put("move", move).put("jump", jump).put("brace", brace),
+            JSONObject()
+                .put("roomCode", roomCode)
+                .put("seq", seq)
+                .put("move", move)
+                .put("jump", jump)
+                .put("brace", brace),
         )
     }
 

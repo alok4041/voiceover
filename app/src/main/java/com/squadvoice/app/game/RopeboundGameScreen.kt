@@ -356,6 +356,7 @@ internal fun RopeboundGameScreen(
                 error = error,
                 viewerIdentity = identity,
                 microphoneEnabled = microphoneEnabled,
+                onDismissError = { error = null },
                 onToggleMicrophone = onToggleMicrophone,
                 onOpenGameSettings = ::openGameSettings,
                 onExit = ::exitGame,
@@ -706,6 +707,7 @@ private fun RaceContent(
     error: String?,
     viewerIdentity: String,
     microphoneEnabled: Boolean,
+    onDismissError: () -> Unit,
     viewerSpectating: Boolean,
     onToggleMicrophone: () -> Unit,
     onOpenGameSettings: () -> Unit,
@@ -817,7 +819,21 @@ private fun RaceContent(
                 )
             }
             Text(state.notice, fontSize = 10.sp, color = Color.White.copy(alpha = .82f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            error?.let { Text(it, color = Color(0xFFFFA8A8), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            error?.let {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        it,
+                        modifier = Modifier.weight(1f),
+                        color = Color(0xFFFFA8A8),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    TextButton(onClick = onDismissError, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Text("×", color = Color.White, fontSize = 16.sp)
+                    }
+                }
+            }
         }
 
         if (viewerSpectating) {
@@ -1134,15 +1150,15 @@ private fun CourseCanvas(
         drawRect(Color(0xFF17242C), Offset(pitLeft, groundY - 2.dp.toPx()), Size(pitRight - pitLeft, h * .22f))
         drawRect(Color(0xFF1B2930), Offset(pitLeft - 5.dp.toPx(), groundY - 4.dp.toPx()), Size(5.dp.toPx(), h * .06f))
         drawRect(Color(0xFF1B2930), Offset(pitRight, groundY - 4.dp.toPx()), Size(5.dp.toPx(), h * .06f))
-        // Bright spike teeth make the existing fall-and-regroup pit readable.
+        // Keep the spike teeth visibly below the ground line so jumps stay readable.
         val spikeCount = 8
         repeat(spikeCount) { index ->
             val spikeWidth = (pitRight - pitLeft) / spikeCount
             val spikeX = pitLeft + spikeWidth * index
             drawPath(Path().apply {
-                moveTo(spikeX, groundY + h * .19f)
-                lineTo(spikeX + spikeWidth * .5f, groundY + h * .07f)
-                lineTo(spikeX + spikeWidth, groundY + h * .19f)
+                moveTo(spikeX, groundY + h * .135f)
+                lineTo(spikeX + spikeWidth * .5f, groundY + h * .085f)
+                lineTo(spikeX + spikeWidth, groundY + h * .135f)
                 close()
             }, Color(0xFFE5DCE6))
         }
@@ -1266,7 +1282,9 @@ private fun CourseCanvas(
         animatedPlayers.forEachIndexed { index, player ->
             val x = courseX(player.progress)
             val playerHeight = (player.height / 12f).coerceIn(-.35f, .5f) * h
-            val runnerY = groundY - runnerSize - playerHeight
+            // runnerY is the runner's upper drawing anchor; shoes extend .16 size below it.
+            // Place that bottom edge on the track when the server reports height zero.
+            val runnerY = groundY - runnerSize * .16f - playerHeight
             if (player.progress in .56f..62f && player.height < 0f) {
                 repeat(4) { bubbleIndex ->
                     val bubblePhase = (hazardPhase + bubbleIndex * .24f) % 1f
@@ -1279,7 +1297,7 @@ private fun CourseCanvas(
                 val previous = animatedPlayers[index - 1]
                 val previousX = courseX(previous.progress)
                 val previousHeight = (previous.height / 12f).coerceIn(-.35f, .5f) * h
-                val previousY = groundY - runnerSize - previousHeight
+                val previousY = groundY - runnerSize * .96f - previousHeight
                 val gap = (previous.progress - player.progress).coerceAtLeast(0f)
                 val tension = (gap * 100f / 7.5f).coerceIn(0f, 1f)
                 val ropeColor = when {
@@ -1287,7 +1305,7 @@ private fun CourseCanvas(
                     tension > .55f -> Color(0xFF9DE4E8)
                     else -> Color(0xFF66E0CB)
                 }
-                drawLine(ropeColor, Offset(previousX, previousY), Offset(x, runnerY), strokeWidth = 4.dp.toPx())
+                drawLine(ropeColor, Offset(previousX, previousY), Offset(x, runnerY - runnerSize * .8f), strokeWidth = 4.dp.toPx())
             }
             val costume = listOf(Color(0xFF8B6CE8), Color(0xFFE17875), Color(0xFF53B8A7), Color(0xFFF0A848), Color(0xFF6AA8E5))[index % 5]
             val poorConnection = player.pingMs?.let { it >= 300 } == true

@@ -25,12 +25,12 @@ const RESPAWN_LANES = {
   64: { start: 64, end: 66.5 },
   80: { start: 80, end: 83.5 },
 };
-const PIT = { id: 'pit', label: 'Spike pit', start: 23, end: 29, leadIn: 4, action: 'jump', hint: 'Build speed and leap over the spikes.' };
-const BOULDER = { id: 'boulder', label: 'Path boulder', start: 36, end: 39, leadIn: 4, action: 'jump', hint: 'Jump over the big stone blocking the path.' };
-const RIVER_BRIDGE = { id: 'river-bridge', label: 'Rope bridge', start: 43, end: 50, leadIn: 0, action: 'run', hint: 'Keep running across the swaying bridge. Stop too long and it will break.' };
-const RIVER_GAP = { id: 'river-gap', label: 'Open river', start: 56, end: 62, leadIn: 3, action: 'jump', hint: 'Run and jump across the open river. Falling in sends your team back to its checkpoint.' };
-const WIND_TUNNEL = { id: 'wind-tunnel', label: 'Wind tunnel', start: 67, end: 75, leadIn: 3, action: 'brace', hint: 'Hold Brace together against the gusts.' };
-const LAVA = { id: 'lava', label: 'Lava flow', start: 84, end: 92, leadIn: 4, action: 'jump', hint: 'Leap over the lava flow; do not land in it.' };
+const PIT = { id: 'pit', label: 'Spike pit', start: 23, end: 27.5, leadIn: 4, action: 'jump', hint: 'Build speed and leap over the spikes.' };
+const BOULDER = { id: 'boulder', label: 'Path boulder', start: 36, end: 38.5, leadIn: 4, action: 'jump', hint: 'Jump over the big stone blocking the path.' };
+const RIVER_BRIDGE = { id: 'river-bridge', label: 'Rope bridge', start: 43, end: 49, leadIn: 0, action: 'run', hint: 'Keep running across the swaying bridge. Stop too long and it will break.' };
+const RIVER_GAP = { id: 'river-gap', label: 'Open river', start: 56, end: 61, leadIn: 3, action: 'jump', hint: 'Run and jump across the open river. Falling in sends your team back to its checkpoint.' };
+const WIND_TUNNEL = { id: 'wind-tunnel', label: 'Wind tunnel', start: 67, end: 73.5, leadIn: 3, action: 'brace', hint: 'Hold Brace together against the gusts.' };
+const LAVA = { id: 'lava', label: 'Lava flow', start: 84, end: 90.5, leadIn: 4, action: 'jump', hint: 'Leap over the lava flow; do not land in it.' };
 const HAZARDS = [
   PIT,
   BOULDER,
