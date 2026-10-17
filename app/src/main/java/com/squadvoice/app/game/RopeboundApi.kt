@@ -1,5 +1,6 @@
 package com.squadvoice.app.game
 
+import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
@@ -10,9 +11,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import com.squadvoice.app.BuildConfig
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
+
+internal sealed interface RopeboundRealtimeEvent {
+    data class State(val snapshot: RopeboundSnapshot) : RopeboundRealtimeEvent
+    data class Ping(val roundTripMs: Int) : RopeboundRealtimeEvent
+    data class ServerError(val message: String) : RopeboundRealtimeEvent
+}
 
 internal data class RopeboundPlayer(
     val id: String,
@@ -86,6 +98,9 @@ internal data class RopeboundSnapshot(
 internal class RopeboundApi(
     private val baseUrl: String = BuildConfig.TOKEN_SERVER_URL,
 ) {
+    private val realtimeClient = OkHttpClient()
+    private val realtimeSocket = AtomicReference<WebSocket?>(null)
+
     suspend fun join(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/join", roomCode, participantToken)
 
@@ -99,46 +114,69 @@ internal class RopeboundApi(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun events(roomCode: String, participantToken: String): Flow<RopeboundSnapshot> = callbackFlow {
-        val connectionRef = AtomicReference<HttpURLConnection?>(null)
-        val readerJob = launch(Dispatchers.IO) {
-            try {
-                val connection = URL(
-                    baseUrl.trimEnd('/') + "/games/events?roomCode=${roomCode.encodeUrl()}",
-                ).openConnection() as HttpURLConnection
-                connectionRef.set(connection)
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 5_000
-                connection.readTimeout = 0
-                connection.setRequestProperty("Authorization", "Bearer $participantToken")
-                connection.setRequestProperty("Accept", "text/event-stream")
-                val status = connection.responseCode
-                if (status !in 200..299) {
-                    val message = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    val responseJson = runCatching { JSONObject(message.orEmpty()) }.getOrNull()
-                    throw IllegalStateException(responseJson?.optString("error") ?: "The game update stream could not connect.")
+    fun events(roomCode: String, participantToken: String): Flow<RopeboundRealtimeEvent> = callbackFlow {
+        val socketBase = baseUrl.trimEnd('/')
+            .replaceFirst(Regex("^https://", RegexOption.IGNORE_CASE), "wss://")
+            .replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "ws://")
+        val request = Request.Builder()
+            .url("$socketBase/games/realtime?roomCode=${roomCode.encodeUrl()}")
+            .header("Authorization", "Bearer $participantToken")
+            .build()
+        val socket = realtimeClient.newWebSocket(
+            request,
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    realtimeSocket.set(webSocket)
                 }
-                connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                    while (isActive) {
-                        val line = reader.readLine() ?: break
-                        if (line.startsWith("data:")) {
-                            val eventJson = JSONObject(line.removePrefix("data:").trim())
-                            trySend(parseSnapshot(eventJson))
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    try {
+                        val message = JSONObject(text)
+                        when (message.optString("type")) {
+                            "pong" -> {
+                                val sentAt = message.optLong("clientSentAt", -1L)
+                                if (sentAt >= 0L) {
+                                    val elapsed = (SystemClock.elapsedRealtime() - sentAt).coerceIn(0L, 5_000L).toInt()
+                                    trySend(RopeboundRealtimeEvent.Ping(elapsed))
+                                }
+                            }
+                            "error" -> trySend(
+                                RopeboundRealtimeEvent.ServerError(
+                                    message.optString("message", "The game server rejected an update."),
+                                ),
+                            )
+                            else -> trySend(RopeboundRealtimeEvent.State(parseSnapshot(message)))
                         }
+                    } catch (failure: Throwable) {
+                        close(IllegalStateException("The game server sent an invalid real-time update.", failure))
                     }
                 }
-                if (isActive) throw IllegalStateException("The game update stream closed.")
-            } catch (failure: Throwable) {
-                if (isActive) close(failure)
-            } finally {
-                connectionRef.getAndSet(null)?.disconnect()
-            }
-        }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    realtimeSocket.compareAndSet(webSocket, null)
+                    if (isActive) close(IllegalStateException("The game update connection closed."))
+                }
+
+                override fun onFailure(webSocket: WebSocket, failure: Throwable, response: Response?) {
+                    realtimeSocket.compareAndSet(webSocket, null)
+                    if (isActive) close(failure)
+                }
+            },
+        )
+        realtimeSocket.set(socket)
         awaitClose {
-            connectionRef.getAndSet(null)?.disconnect()
-            readerJob.cancel()
+            realtimeSocket.compareAndSet(socket, null)
+            socket.close(1000, "Leaving game screen")
         }
     }
+
+    fun heartbeat(pingMs: Int?): Boolean = realtimeSocket.get()?.send(
+        JSONObject()
+            .put("type", "ping")
+            .put("clientSentAt", SystemClock.elapsedRealtime())
+            .put("pingMs", pingMs ?: JSONObject.NULL)
+            .toString(),
+    ) == true
 
     suspend fun chooseTeam(roomCode: String, participantToken: String, team: String): RopeboundSnapshot =
         post("/games/team", roomCode, participantToken, JSONObject().put("team", team))
@@ -167,27 +205,20 @@ internal class RopeboundApi(
     suspend fun rematch(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/rematch", roomCode, participantToken)
 
-    suspend fun input(
-        roomCode: String,
-        participantToken: String,
+    fun input(
         seq: Long,
         move: Int = 0,
         jump: Boolean = false,
         brace: Boolean = false,
-    ) {
-        requestJson(
-            "POST",
-            "/games/input",
-            roomCode,
-            participantToken,
-            JSONObject()
-                .put("roomCode", roomCode)
+    ): Boolean = realtimeSocket.get()?.send(
+        JSONObject()
+                .put("type", "input")
                 .put("seq", seq)
                 .put("move", move)
                 .put("jump", jump)
-                .put("brace", brace),
-        )
-    }
+                .put("brace", brace)
+                .toString(),
+    ) == true
 
     suspend fun leave(roomCode: String, participantToken: String) {
         requestJson("POST", "/games/leave", roomCode, participantToken, JSONObject().put("roomCode", roomCode))

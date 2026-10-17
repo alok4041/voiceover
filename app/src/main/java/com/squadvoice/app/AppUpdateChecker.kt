@@ -21,12 +21,30 @@ data class LatestApkRelease(
 object AppUpdateChecker {
     private const val LATEST_RELEASE_URL =
         "https://api.github.com/repos/alok4041/voiceover/releases/latest"
+    private const val LATEST_RELEASE_PAGE_URL =
+        "https://github.com/alok4041/voiceover/releases/latest"
     private const val MAX_APK_SIZE_BYTES = 250L * 1024L * 1024L
     private const val UPDATE_MIME_TYPE = "application/vnd.android.package-archive"
 
     suspend fun fetchLatestApk(): LatestApkRelease = withContext(Dispatchers.IO) {
-        val connection = URL(LATEST_RELEASE_URL).openConnection() as HttpURLConnection
         try {
+            fetchLatestApkFromApi()
+        } catch (apiError: Exception) {
+            try {
+                fetchLatestApkFromReleasePage()
+            } catch (pageError: Exception) {
+                throw IllegalStateException(
+                    "GitHub update check failed: ${apiError.message ?: "API unavailable"}. " +
+                        "Release page fallback failed: ${pageError.message ?: "page unavailable"}.",
+                    apiError,
+                )
+            }
+        }
+    }
+
+    private fun fetchLatestApkFromApi(): LatestApkRelease {
+        val connection = URL(LATEST_RELEASE_URL).openConnection() as HttpURLConnection
+        return try {
             connection.requestMethod = "GET"
             connection.connectTimeout = 10_000
             connection.readTimeout = 15_000
@@ -37,7 +55,8 @@ object AppUpdateChecker {
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val responseText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status !in 200..299) {
-                throw IllegalStateException("GitHub returned HTTP $status")
+                val detail = if (status == HttpURLConnection.HTTP_FORBIDDEN) " (possibly rate limited)" else ""
+                throw IllegalStateException("GitHub returned HTTP $status$detail")
             }
 
             val release = JSONObject(responseText)
@@ -56,6 +75,38 @@ object AppUpdateChecker {
             if (downloadUrl.isBlank()) throw IllegalStateException("The APK download link is missing.")
 
             LatestApkRelease(version = version, downloadUrl = downloadUrl)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun fetchLatestApkFromReleasePage(): LatestApkRelease {
+        val connection = URL(LATEST_RELEASE_PAGE_URL).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 15_000
+            connection.setRequestProperty("Accept", "text/html")
+            connection.setRequestProperty("User-Agent", "SquadVoice-Android")
+
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                throw IllegalStateException("GitHub release page returned HTTP $status")
+            }
+            val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val asset = Regex(
+                """/alok4041/voiceover/releases/download/([^/?#"]+)/([^/?#"]+\.apk)(?:[?#"]|$)""",
+                RegexOption.IGNORE_CASE,
+            ).find(html) ?: throw IllegalStateException("The latest GitHub release page has no APK asset.")
+            val tag = asset.groupValues[1]
+            val filename = asset.groupValues[2]
+            val version = tag.removePrefix("v").takeIf { it.isNotBlank() }
+                ?: throw IllegalStateException("The latest release has no version tag.")
+            return LatestApkRelease(
+                version = version,
+                downloadUrl = "https://github.com/alok4041/voiceover/releases/download/" +
+                    "${Uri.encode(tag)}/${Uri.encode(filename)}",
+            )
         } finally {
             connection.disconnect()
         }

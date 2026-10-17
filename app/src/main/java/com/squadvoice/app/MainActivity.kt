@@ -31,12 +31,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -113,7 +107,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.runtime.withFrameNanos
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -134,13 +127,7 @@ class MainActivity : ComponentActivity() {
                 mutableStateOf(preferences.getString("accent_theme", initialAccentTheme) ?: initialAccentTheme)
             }
             var micNoiseMode by rememberSaveable { mutableStateOf(initialMicNoiseMode) }
-            var showSplash by rememberSaveable { mutableStateOf(true) }
-            LaunchedEffect(Unit) {
-                // Keep the loader up until Compose has produced the home screen's first frame.
-                withFrameNanos { }
-                showSplash = false
-                this@MainActivity.applySystemBarTheme(darkMode)
-            }
+            LaunchedEffect(darkMode) { this@MainActivity.applySystemBarTheme(darkMode) }
             SquadVoiceTheme(darkMode, accentTheme) {
                 Box(Modifier.fillMaxSize()) {
                     SquadVoiceApp(
@@ -167,9 +154,6 @@ class MainActivity : ComponentActivity() {
                             VoiceSessionManager.setMicNoiseMode(this@MainActivity, selectedMode)
                         },
                     )
-                    if (showSplash) {
-                        SquadVoiceSplashScreen(Modifier.fillMaxSize())
-                    }
                 }
             }
         }
@@ -302,53 +286,6 @@ private fun SquadVoiceTheme(
 }
 
 @Composable
-private fun SquadVoiceSplashScreen(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "squadvoice-splash")
-    val sliderPosition by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_100, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "splash-slider",
-    )
-
-    Box(
-        modifier = modifier
-            .background(Color(0xFF0A1012)),
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp),
-        ) {
-            val trackWidth = 132.dp.toPx()
-            val segmentWidth = 38.dp.toPx()
-            val trackHeight = 4.dp.toPx()
-            val left = (size.width - trackWidth) / 2f
-            val top = (size.height - trackHeight) / 2f
-            drawRoundRect(
-                color = Color(0xFF23413D),
-                topLeft = androidx.compose.ui.geometry.Offset(left, top),
-                size = androidx.compose.ui.geometry.Size(trackWidth, trackHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
-            )
-            drawRoundRect(
-                color = Color(0xFF55E2C8),
-                topLeft = androidx.compose.ui.geometry.Offset(
-                    left + (trackWidth - segmentWidth) * sliderPosition,
-                    top,
-                ),
-                size = androidx.compose.ui.geometry.Size(segmentWidth, trackHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f),
-            )
-        }
-    }
-}
-
-@Composable
 private fun SquadVoiceApp(
     darkMode: Boolean,
     accentTheme: String,
@@ -397,6 +334,7 @@ private fun SquadVoiceApp(
     var pushToTalk by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showRopeboundGame by rememberSaveable { mutableStateOf(false) }
+    var showLocalGamePreview by rememberSaveable { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<LatestApkRelease?>(null) }
     var isDownloadingUpdate by remember { mutableStateOf(false) }
     var updateDownloadProgress by remember { mutableStateOf<Int?>(null) }
@@ -464,7 +402,9 @@ private fun SquadVoiceApp(
     fun closeRopeboundGame() {
         val room = activeRoom
         showRopeboundGame = false
-        if (room != null) {
+        val wasLocalPreview = showLocalGamePreview
+        showLocalGamePreview = false
+        if (room != null && !wasLocalPreview) {
             coroutineScope.launch {
                 runCatching { RopeboundApi().leave(room.code, room.participantToken) }
             }
@@ -692,6 +632,7 @@ private fun SquadVoiceApp(
                     microphoneEnabled = session.micEnabled,
                     onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                     onBack = ::closeRopeboundGame,
+                    previewMode = showLocalGamePreview,
                 )
             } else VoiceRoomScreen(
                 room = activeRoom,
@@ -708,6 +649,12 @@ private fun SquadVoiceApp(
                 overlayEnabled = overlayEnabled,
                 onOpenSettings = { showSettings = true },
                 onPlayRopebound = { showRopeboundGame = true },
+                onOpenLocalPreview = {
+                    if (BuildConfig.DEBUG) {
+                        showLocalGamePreview = true
+                        showRopeboundGame = true
+                    }
+                },
                 onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
                 onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
                 onSetParticipantVolume = { identity, volumePercent ->
@@ -752,6 +699,7 @@ private fun SquadVoiceApp(
                     savedParticipantToken = null
                     isInRoom = false
                     showRopeboundGame = false
+                    showLocalGamePreview = false
                     overlayEnabled = false
                     pushToTalk = false
                     errorMessage = null
@@ -1237,8 +1185,9 @@ private fun SettingsScreen(
                                         updateMessage = "This installed build (v${BuildConfig.VERSION_NAME}) is newer than the latest public release (v${latest.version})."
                                     }
                                 }
-                            } catch (_: Exception) {
-                                updateMessage = "Couldn't check for updates. Check your internet connection and try again."
+                            } catch (error: Exception) {
+                                updateMessage = error.message?.let { "Couldn't check for updates: $it" }
+                                    ?: "Couldn't check for updates. Check your internet connection and try again."
                             } finally {
                                 isCheckingForUpdates = false
                             }

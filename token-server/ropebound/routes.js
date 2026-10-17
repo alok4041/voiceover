@@ -1,5 +1,8 @@
+import { WebSocketServer } from 'ws';
+
 /** Mount the Ropebound API independently from the voice-room token API. */
-export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
+export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, server) {
+  attachRealtimeGameSocket(server, ropebound, requireRoomParticipant);
   app.post('/games/join', (request, response) => {
     const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
     const participant = requireRoomParticipant(request, roomCode);
@@ -106,6 +109,78 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
 
   const gamePresenceCleanup = setInterval(() => ropebound.cleanupStalePlayers(), 2_000);
   gamePresenceCleanup.unref();
+}
+
+function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
+  const webSockets = new WebSocketServer({ noServer: true, maxPayload: 4_096 });
+
+  server.on('upgrade', (request, socket, head) => {
+    const requestUrl = new URL(request.url || '/', 'http://localhost');
+    if (requestUrl.pathname !== '/games/realtime') {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    const roomCode = readText(requestUrl.searchParams.get('roomCode'), 32).toUpperCase();
+    let participant;
+    try {
+      participant = requireRoomParticipant(
+        { get: (header) => request.headers[header.toLowerCase()] },
+        roomCode,
+      );
+    } catch {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    webSockets.handleUpgrade(request, socket, head, (client) => {
+      webSockets.emit('connection', client, request, { roomCode, participant });
+    });
+  });
+
+  webSockets.on('connection', (client, _request, { roomCode, participant }) => {
+    const sendState = () => {
+      if (client.readyState !== WebSocket.OPEN) return;
+      try {
+        client.send(JSON.stringify(ropebound.snapshot(roomCode, participant.identity)));
+      } catch {
+        client.close(1011, 'Game state is unavailable');
+      }
+    };
+
+    sendState();
+    const stateInterval = setInterval(sendState, 100);
+
+    client.on('message', (raw) => {
+      let message;
+      try {
+        message = JSON.parse(raw.toString());
+      } catch {
+        client.close(1007, 'Invalid game message');
+        return;
+      }
+
+      try {
+        if (message.type === 'ping') {
+          const reportedPingMs = Number.isFinite(message.pingMs) ? message.pingMs : null;
+          ropebound.heartbeat(roomCode, participant.identity, reportedPingMs);
+          client.send(JSON.stringify({ type: 'pong', clientSentAt: message.clientSentAt }));
+        } else if (message.type === 'input') {
+          ropebound.input(roomCode, participant.identity, message);
+        }
+      } catch (error) {
+        client.send(JSON.stringify({
+          type: 'error',
+          message: error instanceof Error ? error.message : 'Game message could not be processed.',
+        }));
+      }
+    });
+
+    client.on('close', () => clearInterval(stateInterval));
+    client.on('error', () => clearInterval(stateInterval));
+  });
 }
 
 function readText(value, maximumLength) {

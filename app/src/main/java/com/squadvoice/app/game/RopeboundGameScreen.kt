@@ -1,10 +1,13 @@
 package com.squadvoice.app.game
 
 import android.content.res.Configuration
-import android.os.SystemClock
+import android.graphics.Paint as AndroidPaint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
@@ -28,6 +32,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.AlertDialog
@@ -61,11 +66,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +89,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.runtime.withFrameNanos
 import com.squadvoice.app.R
 import kotlin.math.PI
@@ -109,6 +119,7 @@ internal fun RopeboundGameScreen(
     microphoneEnabled: Boolean,
     onToggleMicrophone: () -> Unit,
     onBack: () -> Unit,
+    previewMode: Boolean = false,
 ) {
     val api = remember { RopeboundApi() }
     val scope = rememberCoroutineScope()
@@ -126,8 +137,13 @@ internal fun RopeboundGameScreen(
     var observedCheckpointA by remember(roomCode) { mutableStateOf<Float?>(null) }
     var observedCheckpointB by remember(roomCode) { mutableStateOf<Float?>(null) }
     var ropeTensionWasHigh by remember(roomCode) { mutableStateOf(false) }
-    val identity = remember(participantToken) { participantIdentity(participantToken) }
-    var snapshot by remember(roomCode) { mutableStateOf<RopeboundSnapshot?>(null) }
+    val identity = remember(participantToken, previewMode) {
+        if (previewMode) "preview1" else participantIdentity(participantToken)
+    }
+    var snapshot by remember(roomCode, previewMode) {
+        mutableStateOf(if (previewMode) localPreviewSnapshot() else null)
+    }
+    val measuredPingMs = remember(roomCode, participantToken) { AtomicReference<Int?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reconnectAttempt by remember(roomCode) { mutableStateOf(0) }
@@ -201,12 +217,22 @@ internal fun RopeboundGameScreen(
     }
 
     LaunchedEffect(roomCode, participantToken, reconnectAttempt) {
+        if (previewMode) return@LaunchedEffect
         while (true) {
             try {
                 snapshot = api.join(roomCode, participantToken)
                 error = null
-                api.events(roomCode, participantToken).collect { current ->
-                    snapshot = current
+                api.events(roomCode, participantToken).collect { event ->
+                    when (event) {
+                        is RopeboundRealtimeEvent.State -> snapshot = event.snapshot
+                        is RopeboundRealtimeEvent.Ping -> {
+                            measuredPingMs.updateAndGet { previous ->
+                                previous?.let { (it * .75f + event.roundTripMs * .25f).roundToInt() }
+                                    ?: event.roundTripMs
+                            }
+                        }
+                        is RopeboundRealtimeEvent.ServerError -> error = event.message
+                    }
                 }
                 error = "The game update connection closed. Reconnecting…"
             } catch (failure: Throwable) {
@@ -219,20 +245,11 @@ internal fun RopeboundGameScreen(
     }
 
     LaunchedEffect(roomCode, participantToken, snapshot?.phase) {
+        if (previewMode) return@LaunchedEffect
         if (snapshot?.phase != "lobby" && snapshot?.phase != "race") return@LaunchedEffect
-        var smoothedPingMs: Int? = null
         while (true) {
-            val requestStartedAt = SystemClock.elapsedRealtime()
-            try {
-                snapshot = api.heartbeat(roomCode, participantToken, smoothedPingMs)
-                val sampleMs = (SystemClock.elapsedRealtime() - requestStartedAt).coerceIn(0L, 5_000L).toInt()
-                smoothedPingMs = smoothedPingMs?.let { previous ->
-                    (previous * .75f + sampleMs * .25f).roundToInt()
-                } ?: sampleMs
-            } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
-            }
-            delay(3_000)
+            api.heartbeat(measuredPingMs.get())
+            delay(1_000)
         }
     }
 
@@ -284,6 +301,7 @@ internal fun RopeboundGameScreen(
     }
 
     LaunchedEffect(roomCode, participantToken, snapshot?.phase, snapshot?.viewerSpectating) {
+        if (previewMode) return@LaunchedEffect
         if (snapshot?.phase != "race" || snapshot?.viewerSpectating == true) return@LaunchedEffect
 
         var sequence = System.currentTimeMillis() * 1_000L
@@ -302,14 +320,13 @@ internal fun RopeboundGameScreen(
 
             if (needsSend) {
                 try {
-                    api.input(
-                        roomCode = roomCode,
-                        participantToken = participantToken,
+                    val sent = api.input(
                         seq = ++sequence,
                         move = current.move,
                         jump = sendJumpPulse,
                         brace = current.bracing,
                     )
+                    if (!sent) throw IllegalStateException("Reconnecting to the live game server…")
                     lastMove = current.move
                     lastBrace = current.bracing
                     if (sendJumpPulse) {
@@ -330,6 +347,11 @@ internal fun RopeboundGameScreen(
     }
 
     fun exitGame() {
+        if (previewMode) {
+            gameAudio.stopAmbience()
+            onBack()
+            return
+        }
         scope.launch {
             gameAudio.stopAmbience()
             withTimeoutOrNull(1_500) { runCatching { api.leave(roomCode, participantToken) } }
@@ -370,6 +392,7 @@ internal fun RopeboundGameScreen(
                     jump()
                 },
                 onBrace = ::setBrace,
+                previewMode = previewMode,
             )
         } else {
             Column(
@@ -378,7 +401,7 @@ internal fun RopeboundGameScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("ROPEBOUND · 2D", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("ROPEBOUND · 3D", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(if (state?.phase == "results") "Race results" else "Game lobby", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     }
                     GameSettingsButton(onClick = ::openGameSettings)
@@ -444,6 +467,65 @@ internal fun RopeboundGameScreen(
             )
         }
     }
+}
+
+private fun localPreviewSnapshot(): RopeboundSnapshot {
+    val names = listOf("Alok", "Mina", "Jax", "Oli")
+    val players = names.mapIndexed { index, name ->
+        RopeboundPlayer(
+            id = "preview${index + 1}",
+            name = name,
+            ready = true,
+            progress = .445f,
+            height = 0f,
+            velocity = 1f,
+            grounded = true,
+            jumping = false,
+            bracing = false,
+            host = index == 0,
+            pingMs = listOf(42, 58, 37, 64)[index],
+        )
+    }
+    val ownTeam = RopeboundTeam(
+        count = players.size,
+        progress = .46f,
+        ropeTension = .18f,
+        surgeCharge = .42f,
+        surgeActive = false,
+        surgeCount = 0,
+        rescues = 3,
+        players = players,
+        spectators = emptyList(),
+    )
+    val rivals = ownTeam.copy(
+        progress = .39f,
+        players = emptyList(),
+    )
+    return RopeboundSnapshot(
+        phase = "race",
+        teamA = ownTeam,
+        teamB = rivals,
+        viewerTeam = "A",
+        viewerSpectating = false,
+        isHost = true,
+        freeTeamSwitching = false,
+        checkpointA = .40f,
+        checkpointB = .36f,
+        winner = null,
+        notice = "Local visual preview · game controls are offline",
+        hazard = null,
+        effect = null,
+        obstacles = listOf(
+            RopeboundObstacle("pit", "Spike pit", "jump", "Jump across the spike pit", 23f, 27.5f),
+            RopeboundObstacle("river-bridge", "Rope bridge", "balance", "Cross the moving bridge", 43f, 49f),
+            RopeboundObstacle("river-gap", "River gap", "jump", "Leap over the river gap", 56f, 61f),
+            RopeboundObstacle("wind-tunnel", "Wind tunnel", "brace", "Brace against the gusts", 67f, 73.5f),
+            RopeboundObstacle("lava", "Fire pit", "jump", "Jump past the lava", 84f, 90.5f),
+        ),
+        durationSeconds = 0,
+        surgesA = 0,
+        surgesB = 0,
+    )
 }
 
 @Composable
@@ -718,10 +800,32 @@ private fun RaceContent(
     onMove: (Int, Boolean) -> Unit,
     onJump: () -> Unit,
     onBrace: (Boolean) -> Unit,
+    previewMode: Boolean,
 ) {
     val ownTeam = if (state.viewerTeam == "A") state.teamA else state.teamB
     val otherTeam = if (state.viewerTeam == "A") state.teamB else state.teamA
     var playgroundReady by remember { mutableStateOf(false) }
+    var minimumLoadingTimeComplete by remember { mutableStateOf(false) }
+    var splashVisible by remember { mutableStateOf(true) }
+    var gameUiVisible by remember { mutableStateOf(false) }
+    var topDownCamera by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(1_900)
+        minimumLoadingTimeComplete = true
+    }
+    LaunchedEffect(playgroundReady, minimumLoadingTimeComplete) {
+        if (playgroundReady && minimumLoadingTimeComplete) {
+            delay(420)
+            splashVisible = false
+            delay(420)
+            gameUiVisible = true
+        }
+    }
+    val cameraBlend by animateFloatAsState(
+        targetValue = if (!gameUiVisible) .48f else if (topDownCamera) 1f else 0f,
+        animationSpec = tween(durationMillis = 700),
+        label = "camera-view-transition",
+    )
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val loadingAnimation = rememberInfiniteTransition(label = "playground-loading")
     val logoPulse by loadingAnimation.animateFloat(
@@ -738,104 +842,88 @@ private fun RaceContent(
     )
 
     Box(modifier = modifier.fillMaxSize().background(Color(0xFF0D202A))) {
-        CourseCanvas(
+        Ropebound3DScene(
             team = ownTeam,
             viewerIdentity = viewerIdentity,
-            effect = state.effect,
             obstacles = state.obstacles,
+            cameraBlend = cameraBlend,
+            showPlayerNameplates = gameUiVisible,
             modifier = Modifier.fillMaxSize(),
             onReady = { playgroundReady = true },
         )
 
+        if (gameUiVisible) {
         Row(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            RaceMarker("YOUR TEAM", ownTeam.progress, Modifier.weight(1f))
-            RaceMarker("RIVALS", otherTeam.progress, Modifier.weight(1f))
-            RopeTensionMarker(ownTeam.ropeTension, Modifier.weight(1f))
-            GameSettingsButton(onOpenGameSettings, Modifier.height(42.dp))
-            OutlinedButton(
-                onClick = onToggleMicrophone,
-                modifier = Modifier.height(42.dp),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xCC10212A), contentColor = Color.White),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = .6f)),
-            ) { Text(if (microphoneEnabled) "Mic on" else "Mic off", fontSize = 12.sp) }
-            OutlinedButton(
-                onClick = onExit,
-                modifier = Modifier.height(42.dp),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xCC10212A), contentColor = Color.White),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = .6f)),
-            ) { Text("Voice", fontSize = 12.sp) }
-        }
-
-        if (ownTeam.players.isNotEmpty()) {
             Row(
-                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(.60f).padding(top = 58.dp)
-                    .background(Color(0xB9102028), RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+                    .background(Color(0xE6102630), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0xFF20C7D3).copy(alpha = .65f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ownTeam.players.forEach { player ->
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(player.name, color = Color.White, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.padding(horizontal = 2.dp))
-                        PingBadge(player.pingMs)
-                    }
-                }
+                RaceMarker("TEAM", ownTeam.progress, Modifier.weight(1f), valueColor = Color(0xFF18D9EA))
+                HudStatDivider()
+                RaceMarker("RIVALS", otherTeam.progress, Modifier.weight(1f), valueColor = Color(0xFFFF6688))
+                HudStatDivider()
+                RaceMarker("TENSION", ownTeam.ropeTension, Modifier.weight(1f), valueColor = Color(0xFFFFD34E), isTension = true)
             }
+            HudActionButton(GameHudIcon.Follow, "FOLLOW", selected = !topDownCamera, modifier = Modifier.width(82.dp)) {
+                topDownCamera = false
+            }
+            HudActionButton(GameHudIcon.TopView, "TOP", selected = topDownCamera, modifier = Modifier.width(62.dp)) {
+                topDownCamera = true
+            }
+            HudActionButton(GameHudIcon.Settings, null, modifier = Modifier.width(42.dp), description = "Game settings", onClick = onOpenGameSettings)
+            HudActionButton(
+                icon = GameHudIcon.Microphone,
+                label = if (microphoneEnabled) "Mic on" else "Mic off",
+                modifier = Modifier.width(70.dp),
+                description = if (microphoneEnabled) "Mute microphone" else "Unmute microphone",
+                onClick = onToggleMicrophone,
+            )
+            HudActionButton(
+                icon = GameHudIcon.Voice,
+                label = "Voice",
+                modifier = Modifier.width(64.dp),
+                description = "Back to voice room",
+                onClick = onExit,
+            )
         }
 
-        Column(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(.66f).padding(bottom = 82.dp)
-                .background(Color(0xD9102028), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            state.hazard?.let { hazard ->
-                val actionName = when (hazard.action) {
-                    "jump" -> "JUMP"
-                    "brace" -> "BRACE"
-                    else -> "KEEP MOVING"
-                }
+        if (previewMode && gameUiVisible) {
+            Text(
+                "LOCAL PREVIEW · 4 DEMO RUNNERS",
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 53.dp)
+                    .background(Color(0xB9102630), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                color = Color(0xFF9BE9DE),
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = .8.sp,
+            )
+        }
+
+        error?.let {
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
+                    .background(Color(0xDD451C24), RoundedCornerShape(10.dp))
+                    .padding(start = 10.dp, end = 4.dp, top = 3.dp, bottom = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    if (hazard.active) "${hazard.label.uppercase()} · $actionName NOW"
-                    else "NEXT · ${hazard.label.uppercase()} · ${hazard.distance.roundToInt()}m",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (hazard.active) Color(0xFFFFD166) else Color(0xFF79E7D5),
-                )
-                Text(hazard.hint, fontSize = 11.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            SquadSurgeMeter(ownTeam)
-            if (ownTeam.spectators.isNotEmpty()) {
-                Text(
-                    "SPECTATING · ${ownTeam.spectators.joinToString()}",
+                    it,
+                    color = Color(0xFFFFC5C5),
                     fontSize = 9.sp,
-                    color = Color(0xFFFFD166),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-            Text(state.notice, fontSize = 10.sp, color = Color.White.copy(alpha = .82f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            error?.let {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        it,
-                        modifier = Modifier.weight(1f),
-                        color = Color(0xFFFFA8A8),
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    TextButton(onClick = onDismissError, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                        Text("×", color = Color.White, fontSize = 16.sp)
-                    }
+                TextButton(onClick = onDismissError, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                    Text("×", color = Color.White, fontSize = 14.sp)
                 }
             }
         }
@@ -857,48 +945,43 @@ private fun RaceContent(
                 )
             }
         } else {
-            // Controls are split so thumbs can reach them comfortably:
-            // left side = movement (Backward / Forward), right side = Jump (primary) + Brace.
-            // Every touch target is at least 48dp x 48dp for reliable finger taps.
-            val bottomPadding = if (isLandscape) 20.dp else 14.dp
+            // Compact controls retain 56dp touch targets while taking less screen space.
+            val bottomPadding = if (isLandscape) 10.dp else 8.dp
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = bottomPadding),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(horizontal = 12.dp, vertical = bottomPadding),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Left corner: movement buttons stacked vertically
-                Column(
-                    modifier = Modifier.width(120.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    HoldMoveButton("◀", -1, Modifier.height(56.dp).width(56.dp), onMove)
-                    HoldMoveButton("Forward ▶", 1, Modifier.height(56.dp).fillMaxWidth(), onMove)
-                }
-                // Right side: Jump (prominent) + Brace stacked vertically
-                Column(
-                    modifier = Modifier.width(160.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = onJump,
-                        modifier = Modifier.height(56.dp).fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66E0CB), contentColor = Color(0xFF082521)),
-                    ) { Text("Jump ↑", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
-                    HoldBraceButton(onBrace, Modifier.height(56.dp).fillMaxWidth())
-                }
+                HoldMoveButton(-1, Modifier.size(56.dp), onMove)
+                HoldMoveButton(1, Modifier.size(56.dp), onMove)
+                Spacer(Modifier.weight(1f))
+                GameActionButton(
+                    onClick = onJump,
+                    description = "Jump",
+                    icon = GameControlIcon.Jump,
+                    modifier = Modifier.size(56.dp),
+                    highlighted = true,
+                )
+                HoldBraceButton(onBrace, Modifier.size(56.dp))
             }
+        }
         }
 
         AnimatedVisibility(
-            visible = !playgroundReady,
+            visible = splashVisible,
             modifier = Modifier.fillMaxSize(),
             enter = fadeIn(tween(120)),
             exit = fadeOut(tween(420)),
         ) {
-            MatchLoadingOverlay(logoPulse = logoPulse, runnerTravel = runnerTravel)
+            MatchLoadingOverlay(
+                teamSize = ownTeam.players.size,
+                worldReady = playgroundReady,
+                logoPulse = logoPulse,
+                runnerTravel = runnerTravel,
+            )
         }
     }
 }
@@ -920,6 +1003,89 @@ private fun GameSettingsButton(
         border = BorderStroke(1.dp, Color.White.copy(alpha = .6f)),
     ) {
         Text("⚙", fontSize = 18.sp)
+    }
+}
+
+private enum class GameHudIcon { Follow, TopView, Settings, Microphone, Voice }
+
+@Composable
+private fun HudActionButton(
+    icon: GameHudIcon,
+    label: String?,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    description: String = label ?: "Game action",
+    onClick: () -> Unit,
+) {
+    val accent = Color(0xFF16D9E7)
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(38.dp).semantics { contentDescription = description },
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 0.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) Color(0xE51B4C58) else Color(0xE6102630),
+            contentColor = Color.White,
+        ),
+        border = BorderStroke(1.dp, accent.copy(alpha = if (selected) .9f else .52f)),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Canvas(Modifier.size(18.dp)) {
+                val c = accent
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val stroke = 2.dp.toPx()
+                when (icon) {
+                    GameHudIcon.Follow -> {
+                        drawCircle(c, 2.6.dp.toPx(), Offset(cx, cy - 4.dp.toPx()))
+                        drawCircle(c, 2.dp.toPx(), Offset(cx - 5.dp.toPx(), cy - 2.dp.toPx()))
+                        drawCircle(c, 2.dp.toPx(), Offset(cx + 5.dp.toPx(), cy - 2.dp.toPx()))
+                        drawRoundRect(c, Offset(cx - 6.dp.toPx(), cy + 1.dp.toPx()), Size(12.dp.toPx(), 5.dp.toPx()), CornerRadius(3.dp.toPx()))
+                        drawRoundRect(c, Offset(cx - 9.dp.toPx(), cy + 2.dp.toPx()), Size(5.dp.toPx(), 4.dp.toPx()), CornerRadius(2.dp.toPx()))
+                        drawRoundRect(c, Offset(cx + 4.dp.toPx(), cy + 2.dp.toPx()), Size(5.dp.toPx(), 4.dp.toPx()), CornerRadius(2.dp.toPx()))
+                    }
+                    GameHudIcon.TopView -> {
+                        drawRoundRect(c, Offset(cx - 8.dp.toPx(), cy - 5.dp.toPx()), Size(16.dp.toPx(), 11.dp.toPx()), CornerRadius(2.dp.toPx()), style = Stroke(stroke))
+                        drawCircle(c, 2.5.dp.toPx(), Offset(cx, cy + .5f.dp.toPx()), style = Stroke(stroke))
+                        drawLine(c, Offset(cx - 4.dp.toPx(), cy - 7.dp.toPx()), Offset(cx + 4.dp.toPx(), cy - 7.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    }
+                    GameHudIcon.Settings -> {
+                        drawCircle(c, 5.dp.toPx(), Offset(cx, cy), style = Stroke(stroke))
+                        drawCircle(c, 1.5.dp.toPx(), Offset(cx, cy))
+                        repeat(8) { i ->
+                            val angle = i * PI / 4
+                            val inner = 6.dp.toPx()
+                            val outer = 8.dp.toPx()
+                            drawLine(
+                                c,
+                                Offset(cx + cos(angle).toFloat() * inner, cy + sin(angle).toFloat() * inner),
+                                Offset(cx + cos(angle).toFloat() * outer, cy + sin(angle).toFloat() * outer),
+                                stroke,
+                                cap = StrokeCap.Round,
+                            )
+                        }
+                    }
+                    GameHudIcon.Microphone -> {
+                        drawRoundRect(c, Offset(cx - 3.dp.toPx(), cy - 8.dp.toPx()), Size(6.dp.toPx(), 11.dp.toPx()), CornerRadius(3.dp.toPx()))
+                        drawArc(c, 180f, 180f, false, Offset(cx - 6.dp.toPx(), cy - 4.dp.toPx()), Size(12.dp.toPx(), 10.dp.toPx()), style = Stroke(stroke))
+                        drawLine(c, Offset(cx, cy + 6.dp.toPx()), Offset(cx, cy + 8.dp.toPx()), stroke, cap = StrokeCap.Round)
+                        drawLine(c, Offset(cx - 3.dp.toPx(), cy + 8.dp.toPx()), Offset(cx + 3.dp.toPx(), cy + 8.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    }
+                    GameHudIcon.Voice -> {
+                        val heights = listOf(4f, 8f, 12f, 6f, 10f, 5f)
+                        heights.forEachIndexed { index, height ->
+                            val x = cx + (index - 2.5f) * 2.6.dp.toPx()
+                            drawLine(c, Offset(x, cy - height.dp.toPx() / 2f), Offset(x, cy + height.dp.toPx() / 2f), stroke, cap = StrokeCap.Round)
+                        }
+                    }
+                }
+            }
+            if (label != null) {
+                Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+        }
     }
 }
 
@@ -1012,45 +1178,112 @@ private fun GameAudioSettingsOverlay(
 }
 
 @Composable
-private fun MatchLoadingOverlay(logoPulse: Float, runnerTravel: Float) {
+private fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: Float, runnerTravel: Float) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val trackProgress = if (runnerTravel < .78f) .72f + runnerTravel * .22f else .89f + (runnerTravel - .78f) * .35f
     Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xED07151C)),
-        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color(0xB307151D),
+                        .30f to Color(0x2607151D),
+                        .62f to Color(0x1607151D),
+                        1f to Color(0xD907151D),
+                    ),
+                ),
+            )
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {}),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth(.68f).background(Color(0xE9162932), RoundedCornerShape(26.dp)).padding(horizontal = 28.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                "ROPEBOUND",
-                modifier = Modifier.graphicsLayer { scaleX = logoPulse; scaleY = logoPulse },
-                color = Color(0xFF66E0CB),
-                fontSize = 25.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 2.sp,
-            )
-            Canvas(modifier = Modifier.fillMaxWidth(.72f).height(34.dp)) {
-                val middle = size.height * .5f
-                drawLine(Color(0xFF66E0CB).copy(alpha = .65f), Offset(0f, middle), Offset(size.width, middle), strokeWidth = 3.dp.toPx())
-                val runnerColors = listOf(Color(0xFF8B6CE8), Color(0xFFE17875), Color(0xFF53B8A7), Color(0xFFF0A848))
-                runnerColors.forEachIndexed { index, color ->
-                    val position = (runnerTravel + index * .22f) % 1f
-                    val x = size.width * position
-                    val y = middle + sin(position * PI * 4).toFloat() * size.height * .12f
-                    drawCircle(color, radius = 6.dp.toPx(), center = Offset(x, y))
-                    drawCircle(Color.White.copy(alpha = .86f), radius = 1.5.dp.toPx(), center = Offset(x + 1.dp.toPx(), y - 1.dp.toPx()))
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "SQUADVOICE",
+                    color = Color.White.copy(alpha = .78f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                )
+                Text(
+                    "ROPEBOUND",
+                    modifier = Modifier.graphicsLayer { scaleX = logoPulse; scaleY = logoPulse },
+                    color = Color(0xFF7BF1DC),
+                    fontSize = if (isLandscape) 28.sp else 24.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 2.5.sp,
+                )
+            }
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .fillMaxWidth(if (isLandscape) .56f else .94f),
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xD9122730),
+                border = BorderStroke(1.dp, Color(0xFF73E6D7).copy(alpha = .52f)),
+                shadowElevation = 14.dp,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("LOADING PLAYGROUND", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
+                    Text(
+                        if (worldReady) "Course ready · joining with $teamSize runners…"
+                        else "Syncing your squad and setting the bridge…",
+                        color = Color(0xFFC2D8DA),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Canvas(Modifier.fillMaxWidth().height(14.dp)) {
+                        val barHeight = size.height * .48f
+                        val top = (size.height - barHeight) / 2f
+                        drawRoundRect(Color.White.copy(alpha = .18f), Offset.Zero, size, CornerRadius(size.height / 2f))
+                        drawRoundRect(
+                            Color(0xFF59E1CB),
+                            Offset.Zero,
+                            Size(size.width * trackProgress, barHeight),
+                            CornerRadius(barHeight / 2f),
+                        )
+                        val headX = size.width * trackProgress
+                        drawCircle(Color.White.copy(alpha = .92f), barHeight * .52f, Offset(headX.coerceAtMost(size.width - barHeight), size.height / 2f))
+                        val runnerColors = listOf(Color(0xFFB9A3FF), Color(0xFFFF927F), Color(0xFF62E2C9), Color(0xFFFFCB67))
+                        runnerColors.forEachIndexed { index, color ->
+                            val x = size.width * ((runnerTravel + index * .19f) % 1f)
+                            if (x < headX) drawCircle(color, barHeight * .28f, Offset(x, size.height / 2f))
+                        }
+                    }
+                    Text(
+                        "Stay together to keep the rope steady.",
+                        color = Color(0xFF83E9D8),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
-            Text("Preparing your playground…", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Getting the team and course ready", color = Color(0xFFB6C9CC), fontSize = 12.sp)
+
+            Text(
+                if (worldReady) "YOUR TEAM IS READY" else "YOUR TEAM IS GETTING READY",
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = Color.White.copy(alpha = .72f),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp,
+            )
         }
     }
 }
 
 @Composable
 private fun HoldMoveButton(
-    label: String,
     direction: Int,
     modifier: Modifier = Modifier,
     onMove: (Int, Boolean) -> Unit,
@@ -1058,15 +1291,14 @@ private fun HoldMoveButton(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
 
-    LaunchedEffect(pressed, direction) { onMove(direction, pressed) }
-
-    OutlinedButton(
-        onClick = {},
+    GameControlButton(
+        icon = if (direction < 0) GameControlIcon.Left else GameControlIcon.Right,
+        description = if (direction < 0) "Move backward" else "Move forward",
         modifier = modifier,
-        interactionSource = interactionSource,
-        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xD9102028), contentColor = Color.White),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = .68f)),
-    ) { Text(label, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+        pressed = pressed,
+        onClick = {},
+        onPressedChange = { onMove(direction, it) },
+    )
 }
 
 @Composable
@@ -1074,29 +1306,135 @@ private fun HoldBraceButton(onBrace: (Boolean) -> Unit, modifier: Modifier = Mod
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     LaunchedEffect(pressed) { onBrace(pressed) }
-    OutlinedButton(
-        onClick = {},
+    GameControlButton(
+        icon = GameControlIcon.Brace,
+        description = "Brace",
         modifier = modifier,
+        pressed = pressed,
         interactionSource = interactionSource,
-        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xD9102028), contentColor = Color.White),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = .68f)),
-    ) { Text("Brace", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+    )
+}
+
+private enum class GameControlIcon { Left, Right, Jump, Brace }
+
+@Composable
+private fun GameActionButton(
+    onClick: () -> Unit,
+    description: String,
+    icon: GameControlIcon,
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false,
+) {
+    GameControlButton(
+        icon = icon,
+        description = description,
+        modifier = modifier,
+        pressed = false,
+        highlighted = highlighted,
+        onClick = onClick,
+    )
 }
 
 @Composable
-private fun RaceMarker(label: String, progress: Float, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.background(Color(0xD9102028), RoundedCornerShape(12.dp)).padding(horizontal = 9.dp, vertical = 6.dp)) {
-        Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp, color = Color.White.copy(alpha = .82f), maxLines = 1)
-        Text("${(progress.coerceIn(0f, 1f) * 100).toInt()}%", fontSize = 15.sp, color = Color(0xFF66E0CB), fontWeight = FontWeight.Bold)
+private fun GameControlButton(
+    icon: GameControlIcon,
+    description: String,
+    modifier: Modifier = Modifier,
+    pressed: Boolean,
+    highlighted: Boolean = false,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    onClick: () -> Unit = {},
+    onPressedChange: ((Boolean) -> Unit)? = null,
+) {
+    val active = pressed || highlighted
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.semantics {
+            contentDescription = description
+        },
+        interactionSource = interactionSource,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (active) Color(0xFF66E0CB) else Color(0xE6102028),
+            contentColor = if (active) Color(0xFF082521) else Color.White,
+        ),
+        border = BorderStroke(1.5.dp, if (active) Color.White.copy(alpha = .92f) else Color.White.copy(alpha = .72f)),
+    ) {
+        Canvas(Modifier.size(25.dp)) {
+            val ink = if (active) Color(0xFF082521) else Color.White
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val stroke = 2.7.dp.toPx()
+            when (icon) {
+                GameControlIcon.Left, GameControlIcon.Right -> {
+                    val sign = if (icon == GameControlIcon.Left) -1f else 1f
+                    drawLine(ink, Offset(cx - sign * 6.dp.toPx(), cy), Offset(cx + sign * 6.dp.toPx(), cy), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx + sign * 6.dp.toPx(), cy), Offset(cx + sign * 1.dp.toPx(), cy - 5.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx + sign * 6.dp.toPx(), cy), Offset(cx + sign * 1.dp.toPx(), cy + 5.dp.toPx()), stroke, cap = StrokeCap.Round)
+                }
+                GameControlIcon.Jump -> {
+                    drawLine(ink, Offset(cx, cy + 8.dp.toPx()), Offset(cx, cy - 7.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx, cy - 7.dp.toPx()), Offset(cx - 6.dp.toPx(), cy - 1.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx, cy - 7.dp.toPx()), Offset(cx + 6.dp.toPx(), cy - 1.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx - 9.dp.toPx(), cy + 9.dp.toPx()), Offset(cx + 9.dp.toPx(), cy + 9.dp.toPx()), stroke, cap = StrokeCap.Round)
+                }
+                GameControlIcon.Brace -> {
+                    val shield = Path().apply {
+                        moveTo(cx, cy - 10.dp.toPx())
+                        lineTo(cx + 8.dp.toPx(), cy - 6.dp.toPx())
+                        lineTo(cx + 7.dp.toPx(), cy + 2.dp.toPx())
+                        quadraticTo(cx + 5.dp.toPx(), cy + 7.dp.toPx(), cx, cy + 10.dp.toPx())
+                        quadraticTo(cx - 5.dp.toPx(), cy + 7.dp.toPx(), cx - 7.dp.toPx(), cy + 2.dp.toPx())
+                        lineTo(cx - 8.dp.toPx(), cy - 6.dp.toPx())
+                        close()
+                    }
+                    drawPath(shield, ink, style = Stroke(width = stroke, cap = StrokeCap.Round))
+                    drawLine(ink, Offset(cx - 3.dp.toPx(), cy), Offset(cx - 0.5f.dp.toPx(), cy + 3.dp.toPx()), stroke, cap = StrokeCap.Round)
+                    drawLine(ink, Offset(cx - 0.5f.dp.toPx(), cy + 3.dp.toPx()), Offset(cx + 4.dp.toPx(), cy - 3.dp.toPx()), stroke, cap = StrokeCap.Round)
+                }
+            }
+        }
+    }
+    if (onPressedChange != null) LaunchedEffect(pressed) { onPressedChange(pressed) }
+}
+
+@Composable
+private fun RaceMarker(
+    label: String,
+    progress: Float,
+    modifier: Modifier = Modifier,
+    valueColor: Color = Color(0xFF66E0CB),
+    isTension: Boolean = false,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = .35.sp,
+            color = Color.White.copy(alpha = .82f),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+        Text(
+            "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+            fontSize = 12.sp,
+            color = if (isTension && progress >= .8f) Color(0xFFFF9B57) else valueColor,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
-private fun RopeTensionMarker(tension: Float, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.background(Color(0xD9102028), RoundedCornerShape(12.dp)).padding(horizontal = 9.dp, vertical = 6.dp)) {
-        Text("ROPE TENSION", fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = .8.sp, color = Color.White.copy(alpha = .82f), maxLines = 1)
-        Text("${(tension.coerceIn(0f, 1f) * 100).toInt()}%", fontSize = 15.sp, color = if (tension >= .8f) Color(0xFFFFB45F) else Color(0xFF66E0CB), fontWeight = FontWeight.Bold)
-    }
+private fun HudStatDivider() {
+    Box(
+        Modifier.padding(horizontal = 5.dp).width(1.dp).height(20.dp)
+            .background(Color(0xFF28C8D5).copy(alpha = .38f)),
+    )
 }
 
 @Composable
@@ -1117,7 +1455,7 @@ private fun CourseCanvas(
     val hazardPhase by hazardTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(2_400, easing = LinearEasing), RepeatMode.Restart),
         label = "hazard-phase",
     )
     val impactProgress = remember(effect?.id) { Animatable(1f) }
@@ -1128,6 +1466,22 @@ private fun CourseCanvas(
         }
     }
     val localPlayer = team.players.firstOrNull { it.id == viewerIdentity }
+    val density = LocalDensity.current
+    val playerNamePaint = remember(density) {
+        AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = with(density) { 9.sp.toPx() }
+            textAlign = AndroidPaint.Align.LEFT
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+    }
+    val playerPingPaint = remember(density) {
+        AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            textSize = with(density) { 8.sp.toPx() }
+            textAlign = AndroidPaint.Align.LEFT
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        }
+    }
     val cameraWidth = .42f
     val cameraMin = -cameraWidth * .45f
     val cameraMax = 1f - cameraWidth * .55f
@@ -1161,6 +1515,40 @@ private fun CourseCanvas(
             dstSize = IntSize(backgroundWidth.roundToInt(), backgroundHeight),
         )
 
+        // Layered turf, brushy tufts, tiny leaves and stones give the course a
+        // hand-painted trail edge. Each blade leans gently with the wind loop.
+        drawRect(Color(0xFF284A38).copy(alpha = .30f), Offset(0f, groundY - h * .045f), Size(w, h * .075f))
+        drawRect(Color(0xFF8DAF54).copy(alpha = .24f), Offset(0f, groundY - h * .010f), Size(w, h * .018f))
+        drawLine(Color(0xFFC5DF83).copy(alpha = .48f), Offset(0f, groundY - h * .012f), Offset(w, groundY - h * .012f), strokeWidth = 2.dp.toPx())
+        repeat(24) { clump ->
+            val clumpX = w * (clump + .5f) / 24f
+            val grassBase = groundY - h * (.008f + (clump % 3) * .002f)
+            val breeze = sin(hazardPhase * PI * 2 + clump * .63).toFloat()
+            val bladeCount = 4 + clump % 3
+            repeat(bladeCount) { blade ->
+                val root = clumpX + (blade - bladeCount / 2f) * 2.2f.dp.toPx()
+                val bladeHeight = h * (.012f + ((clump * 7 + blade * 3) % 6) * .003f)
+                val lean = (blade - bladeCount / 2f) * 2.5f.dp.toPx() + breeze * 3.5f.dp.toPx()
+                val bladeColor = when ((clump + blade) % 4) {
+                    0 -> Color(0xFFC4E477)
+                    1 -> Color(0xFF87C75A)
+                    2 -> Color(0xFF5DAE58)
+                    else -> Color(0xFFE0D77A)
+                }
+                drawPath(Path().apply {
+                    moveTo(root, grassBase)
+                    quadraticTo(root + lean * .25f, grassBase - bladeHeight * .62f, root + lean, grassBase - bladeHeight)
+                }, bladeColor.copy(alpha = .78f), style = Stroke(width = (1.2f + blade % 2).dp.toPx(), cap = StrokeCap.Round))
+            }
+            if (clump % 6 == 2) {
+                drawCircle(Color(0xFFFFE49A), 1.7f.dp.toPx(), Offset(clumpX + 5.dp.toPx(), grassBase - h * .025f))
+                drawCircle(Color(0xFFE88F9B), 1.dp.toPx(), Offset(clumpX + 5.dp.toPx(), grassBase - h * .025f))
+            }
+            if (clump % 4 == 1) {
+                drawOval(Color(0xFFD1BE8D).copy(alpha = .70f), Offset(clumpX - 7.dp.toPx(), groundY + h * .004f), Size(5.dp.toPx(), 2.5.dp.toPx()))
+            }
+        }
+
         val courseLeft = w * .04f
         val courseWidth = w * .92f
         fun courseX(progress: Float) = courseLeft + courseWidth * ((progress - cameraLeft) / cameraWidth)
@@ -1193,18 +1581,45 @@ private fun CourseCanvas(
         fun drawRiver(start: Float, end: Float, openGap: Boolean) {
             val riverLeft = courseX((start - .035f).coerceAtLeast(0f))
             val riverRight = courseX((end + .035f).coerceAtMost(1f))
-            drawRect(Color(0xFF0C435C), Offset(riverLeft, groundY), Size(riverRight - riverLeft, h * .24f))
-            drawRect(Color(0xFF126B86), Offset(riverLeft, groundY + h * .025f), Size(riverRight - riverLeft, h * .20f))
+            val riverWidth = riverRight - riverLeft
+            drawRect(Color(0xFF07364D), Offset(riverLeft, groundY), Size(riverWidth, h * .24f))
+            drawRect(Color(0xFF126B86).copy(alpha = .94f), Offset(riverLeft, groundY + h * .025f), Size(riverWidth, h * .20f))
+            drawRect(Color(0xFF43B8C9).copy(alpha = .22f), Offset(riverLeft, groundY + h * .035f), Size(riverWidth, h * .035f))
+            drawLine(Color(0xFFB4F4DE).copy(alpha = .75f), Offset(riverLeft, groundY + h * .012f), Offset(riverRight, groundY + h * .012f), strokeWidth = 2.dp.toPx())
+            // Slow traveling caustics and nested ripples make the water visibly
+            // flow while keeping the open crossing dark and readable.
+            repeat(7) { index ->
+                val travel = (hazardPhase * 1.3f + index * .19f) % 1f
+                val rippleX = riverLeft + travel * riverWidth
+                val rippleY = groundY + h * (.065f + (index % 3) * .045f) + sin(hazardPhase * PI * 2 + index).toFloat() * h * .008f
+                val rippleWidth = riverWidth * (.035f + (index % 2) * .018f)
+                drawOval(
+                    Color(0xFF8BE5E1).copy(alpha = .16f + .14f * (1f - travel)),
+                    Offset(rippleX - rippleWidth / 2f, rippleY - h * .008f),
+                    Size(rippleWidth, h * .016f),
+                    style = Stroke(width = 1.4f.dp.toPx()),
+                )
+                val wavePath = Path().apply {
+                    moveTo(rippleX - rippleWidth, rippleY)
+                    quadraticTo(rippleX - rippleWidth * .5f, rippleY - h * .012f, rippleX, rippleY)
+                    quadraticTo(rippleX + rippleWidth * .5f, rippleY + h * .012f, rippleX + rippleWidth, rippleY)
+                }
+                drawPath(wavePath, Color(0xFFB5F2E8).copy(alpha = .38f), style = Stroke(width = 1.2f.dp.toPx(), cap = StrokeCap.Round))
+            }
+            repeat(5) { index ->
+                val shimmerTravel = (hazardPhase * .82f + index * .23f) % 1f
+                val shimmerX = riverLeft + shimmerTravel * riverWidth
+                val shimmerY = groundY + h * (.12f + (index % 2) * .035f)
+                val shimmerLength = riverWidth * (.055f + (index % 3) * .015f)
+                drawLine(Color(0xFF6ED9D7).copy(alpha = .24f), Offset(shimmerX, shimmerY), Offset(shimmerX + shimmerLength, shimmerY - h * .008f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+            }
             if (openGap) {
                 val riverGapLeft = courseX(start)
                 val riverGapRight = courseX(end)
                 drawRect(Color(0xFF071B27), Offset(riverGapLeft, groundY - 2.dp.toPx()), Size(riverGapRight - riverGapLeft, h * .25f))
                 drawRect(Color(0xFF147A94), Offset(riverGapLeft, groundY + 2.dp.toPx()), Size(riverGapRight - riverGapLeft, h * .045f))
-            }
-            repeat(4) { index ->
-                val waveY = groundY + h * (.075f + (index % 2) * .065f) + sin(hazardPhase * PI * 2 + index).toFloat() * h * .008f
-                val waveStart = riverLeft + (riverRight - riverLeft) * (index * .18f + hazardPhase * .025f)
-                drawLine(Color(0xFF64D5DC).copy(alpha = .65f + hazardPhase * .3f), Offset(waveStart, waveY), Offset(waveStart + (riverRight - riverLeft) * .16f, waveY - h * .012f), strokeWidth = 2.dp.toPx())
+                drawLine(Color(0xFF86E5E2).copy(alpha = .8f), Offset(riverGapLeft, groundY + h * .015f), Offset(riverGapLeft, groundY + h * .20f), strokeWidth = 2.dp.toPx())
+                drawLine(Color(0xFF86E5E2).copy(alpha = .8f), Offset(riverGapRight, groundY + h * .015f), Offset(riverGapRight, groundY + h * .20f), strokeWidth = 2.dp.toPx())
             }
         }
         drawRiver(obstacleStart("river-bridge", .43f), obstacleEnd("river-bridge", .50f), openGap = false)
@@ -1224,30 +1639,64 @@ private fun CourseCanvas(
         val tileRight = courseX(bridgeEnd)
         val tileCount = 6
         val bridgeRunners = animatedPlayers.filter { it.progress in bridgeStart..bridgeEnd }
+        val bridgeWidth = tileRight - tileLeft
+        val bridgeWavePhase = hazardPhase * PI * 2
+        val bridgeFlex = .014f + (.004f * (.5f + .5f * sin(bridgeWavePhase).toFloat())) + bridgeRunners.size * .0015f
+        fun bridgeWaveY(t: Float) = sin(t * PI).toFloat() * h * bridgeFlex
+        // Draw the woven side ropes first so the planks sit visibly over them.
+        val upperRail = Path().apply {
+            moveTo(tileLeft, groundY - h * .070f + bridgeWaveY(0f))
+            for (step in 1..24) {
+                val t = step / 24f
+                lineTo(tileLeft + bridgeWidth * t, groundY - h * .070f + bridgeWaveY(t))
+            }
+        }
+        val lowerRail = Path().apply {
+            moveTo(tileLeft, groundY + h * .045f + bridgeWaveY(0f) * .45f)
+            for (step in 1..24) {
+                val t = step / 24f
+                lineTo(tileLeft + bridgeWidth * t, groundY + h * .045f + bridgeWaveY(t) * .45f)
+            }
+        }
+        drawPath(upperRail, Color(0xFF55351F), style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(upperRail, Color(0xFFC58A4D).copy(alpha = .82f), style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(lowerRail, Color(0xFF765039), style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
         repeat(tileCount) { index ->
-            val tileWidth = (tileRight - tileLeft) / tileCount
+            val tileWidth = bridgeWidth / tileCount
             val tileX = tileLeft + tileWidth * index
             val tileColor = if (index % 2 == 0) Color(0xFFD7A76B) else Color(0xFFC38C55)
             val tileProgress = bridgeStart + (bridgeEnd - bridgeStart) * (index + .5f) / tileCount
             val pressure = bridgeRunners.maxOfOrNull { runner ->
                 (1f - abs(runner.progress - tileProgress) / ((bridgeEnd - bridgeStart) / tileCount * .8f)).coerceIn(0f, 1f)
             } ?: 0f
-            val sway = sin(hazardPhase * PI * 2 + index * 1.25).toFloat()
-            val plankDrop = if (pressure > 0f) h * (.012f + pressure * .018f) else 0f
-            val plankTilt = sway * (if (bridgeRunners.isEmpty()) 1.5f else 4f + pressure * 7f)
+            val wave = bridgeWaveY((index + .5f) / tileCount)
+            val sway = sin(bridgeWavePhase + index * .82f).toFloat()
+            val plankDrop = pressure * h * .018f
+            val plankTilt = sway * (1.8f + pressure * 5f)
+            val plankTop = groundY - h * .026f + wave + plankDrop
+            val plankHeight = h * .052f
             rotate(plankTilt, Offset(tileX + tileWidth * .5f, groundY)) {
                 drawRoundRect(
-                    tileColor,
-                    Offset(tileX + 2.dp.toPx(), groundY - h * .025f + plankDrop + sway * h * .006f),
-                    Size(tileWidth - 4.dp.toPx(), h * .05f),
+                    Color(0xFF482F24).copy(alpha = .48f),
+                    Offset(tileX + 1.dp.toPx(), plankTop + h * .012f),
+                    Size(tileWidth - 2.dp.toPx(), plankHeight),
                     CornerRadius(4.dp.toPx()),
                 )
+                drawRoundRect(
+                    tileColor,
+                    Offset(tileX + 2.dp.toPx(), plankTop),
+                    Size(tileWidth - 4.dp.toPx(), plankHeight),
+                    CornerRadius(4.dp.toPx()),
+                )
+                drawLine(Color(0xFFFFD99C).copy(alpha = .55f), Offset(tileX + 5.dp.toPx(), plankTop + 2.dp.toPx()), Offset(tileX + tileWidth - 6.dp.toPx(), plankTop + 2.dp.toPx()), strokeWidth = 1.2.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(Color(0xFF8F6038).copy(alpha = .72f), Offset(tileX + tileWidth * .18f, plankTop + plankHeight * .68f), Offset(tileX + tileWidth * .43f, plankTop + plankHeight * .58f), strokeWidth = 1.dp.toPx(), cap = StrokeCap.Round)
+                drawCircle(Color(0xFF5A4335), 1.4.dp.toPx(), Offset(tileX + 5.dp.toPx(), plankTop + plankHeight * .5f))
+                drawCircle(Color(0xFF5A4335), 1.4.dp.toPx(), Offset(tileX + tileWidth - 5.dp.toPx(), plankTop + plankHeight * .5f))
             }
-            drawLine(Color(0xFF765039), Offset(tileX + tileWidth * .53f, groundY - h * .015f), Offset(tileX + tileWidth * .46f, groundY + h * .018f), strokeWidth = 1.5.dp.toPx())
+            val t = (index + .5f) / tileCount
+            val railY = groundY - h * .070f + bridgeWaveY(t)
+            drawLine(Color(0xFF9A6B42), Offset(tileX + tileWidth * .5f, railY), Offset(tileX + tileWidth * .5f, plankTop + plankHeight * .20f), strokeWidth = 1.5.dp.toPx())
         }
-        val bridgeSag = if (bridgeRunners.isEmpty()) 0f else sin(hazardPhase * PI * 2).toFloat() * h * .012f
-        drawLine(Color(0xFF9A6B42), Offset(tileLeft, groundY - h * .065f + bridgeSag), Offset(tileRight, groundY - h * .065f - bridgeSag), strokeWidth = 2.dp.toPx())
-        drawLine(Color(0xFF9A6B42), Offset(tileLeft, groundY + h * .035f + bridgeSag), Offset(tileRight, groundY + h * .035f - bridgeSag), strokeWidth = 2.dp.toPx())
 
         val windLeft = courseX(obstacleStart("wind-tunnel", .67f))
         val windRight = courseX(obstacleEnd("wind-tunnel", .75f))
@@ -1262,23 +1711,57 @@ private fun CourseCanvas(
         val lavaLeft = courseX(obstacleStart("lava", .84f))
         val lavaRight = courseX(obstacleEnd("lava", .92f))
         val lavaPulse = .5f + .5f * sin(hazardPhase * PI * 2).toFloat()
-        drawRect(Color(0xFF631E1B), Offset(lavaLeft, groundY - h * .035f), Size(lavaRight - lavaLeft, h * .24f))
-        drawRect(Color(0xFFFF4D22).copy(alpha = .12f + lavaPulse * .12f), Offset(lavaLeft, groundY - h * (.07f + lavaPulse * .025f)), Size(lavaRight - lavaLeft, h * .045f))
-        drawLine(Color(0xFFFF6B35).copy(alpha = .7f + lavaPulse * .3f), Offset(lavaLeft, groundY - h * .035f), Offset(lavaRight, groundY - h * .035f), strokeWidth = 4.dp.toPx())
+        val lavaWidth = lavaRight - lavaLeft
+        drawOval(Color(0xFFFF4B20).copy(alpha = .10f + lavaPulse * .08f), Offset(lavaLeft - lavaWidth * .12f, groundY - h * .11f), Size(lavaWidth * 1.24f, h * .20f))
+        drawRect(Color(0xFF381D27), Offset(lavaLeft, groundY - h * .035f), Size(lavaWidth, h * .24f))
+        drawRect(Color(0xFF8E2D1D).copy(alpha = .88f), Offset(lavaLeft, groundY + h * .015f), Size(lavaWidth, h * .18f))
+        drawRect(Color(0xFFFF5A24).copy(alpha = .10f + lavaPulse * .17f), Offset(lavaLeft, groundY - h * (.07f + lavaPulse * .025f)), Size(lavaWidth, h * .045f))
+        drawLine(Color(0xFFFF6B35).copy(alpha = .72f + lavaPulse * .28f), Offset(lavaLeft, groundY - h * .035f), Offset(lavaRight, groundY - h * .035f), strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+        // Molten seams drift under the surface, with broken highlights like
+        // painted strokes rather than a flat solid rectangle.
+        repeat(4) { seam ->
+            val travel = (hazardPhase * .72f + seam * .27f) % 1f
+            val seamX = lavaLeft + travel * lavaWidth
+            val seamY = groundY + h * (.07f + (seam % 3) * .038f) + sin(hazardPhase * PI * 2 + seam * 1.4).toFloat() * h * .009f
+            val seamPath = Path().apply {
+                moveTo(seamX - lavaWidth * .09f, seamY)
+                quadraticTo(seamX - lavaWidth * .025f, seamY - h * .012f, seamX + lavaWidth * .025f, seamY + h * .003f)
+                quadraticTo(seamX + lavaWidth * .07f, seamY + h * .014f, seamX + lavaWidth * .11f, seamY - h * .002f)
+            }
+            drawPath(seamPath, Color(0xFFFFC05C).copy(alpha = .28f + lavaPulse * .24f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        }
         repeat(7) { index ->
-            val flameWidth = (lavaRight - lavaLeft) / 7f
+            val flameWidth = lavaWidth / 7f
             val flameX = lavaLeft + flameWidth * index
             val flamePulse = .5f + .5f * sin(hazardPhase * PI * 2 + index * 1.7).toFloat()
-            val peakY = groundY - h * (.12f + flamePulse * .085f)
-            drawPath(Path().apply {
-                moveTo(flameX, groundY - h * .025f)
-                quadraticTo(flameX + flameWidth * .24f, peakY + h * .06f, flameX + flameWidth * .50f, peakY)
-                quadraticTo(flameX + flameWidth * .76f, peakY + h * .055f, flameX + flameWidth, groundY - h * .025f)
+            val sway = sin(hazardPhase * PI * 2 + index * 2.1).toFloat() * flameWidth * .12f
+            val flameBase = groundY - h * .025f
+            val peakY = groundY - h * (.11f + flamePulse * .095f)
+            val outerFlame = Path().apply {
+                moveTo(flameX + sway, flameBase)
+                quadraticTo(flameX - flameWidth * .04f + sway, peakY + h * .07f, flameX + flameWidth * .50f + sway, peakY)
+                quadraticTo(flameX + flameWidth * .91f + sway, peakY + h * .07f, flameX + flameWidth + sway, flameBase)
                 close()
-            }, (if (index % 2 == 0) Color(0xFFFF9F43) else Color(0xFFFF5B35)).copy(alpha = .78f + flamePulse * .22f))
-            val emberX = flameX + flameWidth * (.2f + flamePulse * .6f)
-            val emberY = groundY - h * (.04f + flamePulse * .08f)
-            drawCircle(Color(0xFFFFD166).copy(alpha = .45f + flamePulse * .5f), h * (.004f + flamePulse * .003f), Offset(emberX, emberY))
+            }
+            drawPath(outerFlame, (if (index % 2 == 0) Color(0xFFFF9638) else Color(0xFFFF5234)).copy(alpha = .78f + flamePulse * .22f))
+            val innerPeak = peakY + h * .055f
+            drawPath(Path().apply {
+                moveTo(flameX + flameWidth * .22f + sway, flameBase - h * .006f)
+                quadraticTo(flameX + flameWidth * .30f + sway, innerPeak + h * .045f, flameX + flameWidth * .52f + sway, innerPeak)
+                quadraticTo(flameX + flameWidth * .72f + sway, innerPeak + h * .04f, flameX + flameWidth * .79f + sway, flameBase - h * .006f)
+                close()
+            }, Color(0xFFFFD166).copy(alpha = .42f + flamePulse * .38f))
+        }
+        repeat(9) { ember ->
+            val emberPhase = (hazardPhase * (1.05f + (ember % 3) * .18f) + ember * .137f) % 1f
+            val emberX = lavaLeft + lavaWidth * ((ember * .618f + hazardPhase * .13f) % 1f)
+            val emberY = groundY - h * (.045f + emberPhase * (.11f + (ember % 3) * .018f))
+            val emberAlpha = (sin(emberPhase * PI).toFloat() * .7f + .15f).coerceIn(.12f, .82f)
+            val emberDrift = sin(hazardPhase * PI * 2 + ember).toFloat() * h * .008f
+            drawCircle(Color(0xFFFFD166).copy(alpha = emberAlpha), h * (.003f + (ember % 3) * .0012f), Offset(emberX + emberDrift, emberY))
+            if (ember % 2 == 0) {
+                drawCircle(Color(0xFFFF7A32).copy(alpha = emberAlpha * .30f), h * .010f, Offset(emberX + emberDrift, emberY))
+            }
         }
 
         // Checkpoint flags and the finish arch give players landmarks as they move.
@@ -1310,6 +1793,12 @@ private fun CourseCanvas(
             // runnerY is the runner's upper drawing anchor; shoes extend .16 size below it.
             // Place that bottom edge on the track when the server reports height zero.
             val runnerY = groundY - runnerSize * .16f - playerHeight
+            val shadowScale = (1f - abs(playerHeight) / (h * .5f)).coerceIn(.35f, 1f)
+            drawOval(
+                color = Color(0xFF10271D).copy(alpha = .34f * shadowScale),
+                topLeft = Offset(x - runnerSize * .62f * shadowScale, groundY - runnerSize * .10f),
+                size = Size(runnerSize * 1.24f * shadowScale, runnerSize * .20f),
+            )
             if (player.progress in .56f..62f && player.height < 0f) {
                 repeat(4) { bubbleIndex ->
                     val bubblePhase = (hazardPhase + bubbleIndex * .24f) % 1f
@@ -1330,13 +1819,27 @@ private fun CourseCanvas(
                     tension > .55f -> Color(0xFF9DE4E8)
                     else -> Color(0xFF66E0CB)
                 }
-                drawLine(ropeColor, Offset(previousX, previousY), Offset(x, runnerY - runnerSize * .8f), strokeWidth = 4.dp.toPx())
+                val ropeEndY = runnerY - runnerSize * .8f
+                val slack = (1f - tension).coerceIn(0f, 1f)
+                val gentleSway = sin(hazardPhase * PI * 2 + index * .55).toFloat() * runnerSize * .035f * slack
+                val ropeSag = runnerSize * (.025f + slack * .42f)
+                val ropePath = Path().apply {
+                    moveTo(previousX, previousY)
+                    quadraticTo(
+                        (previousX + x) / 2f,
+                        (previousY + ropeEndY) / 2f + ropeSag + gentleSway,
+                        x,
+                        ropeEndY,
+                    )
+                }
+                drawPath(
+                    path = ropePath,
+                    color = ropeColor,
+                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
+                )
             }
             val costume = listOf(Color(0xFF8B6CE8), Color(0xFFE17875), Color(0xFF53B8A7), Color(0xFFF0A848), Color(0xFF6AA8E5))[index % 5]
-            val poorConnection = player.pingMs?.let { it >= 300 } == true
-            val characterAlpha = if (poorConnection) {
-                .62f + sin(hazardPhase * PI * 3 + index * .4).toFloat().let { it * it } * .30f
-            } else 1f
+            val characterAlpha = 1f
             val runnerCostume = costume.copy(alpha = characterAlpha)
             if (team.surgeActive) {
                 drawCircle(Color(0xFF66E0CB).copy(alpha = .15f + hazardPhase * .12f), runnerSize * 1.18f, Offset(x, runnerY - runnerSize * .48f))
@@ -1358,9 +1861,23 @@ private fun CourseCanvas(
                     sin(hazardPhase * PI * 4 + index * .7).toFloat() * runnerSize * .24f
                 else -> 0f
             }
-            drawRoundRect(runnerCostume, Offset(x - runnerSize * .42f, runnerY - runnerSize * .76f), Size(runnerSize * .84f, runnerSize * .7f), CornerRadius(runnerSize * .26f))
-            drawCircle(Color(0xFFFFC857).copy(alpha = characterAlpha), runnerSize * .40f, Offset(x, runnerY - runnerSize * 1.05f))
+            drawRoundRect(Color(0xFF17242C).copy(alpha = .65f), Offset(x - runnerSize * .44f, runnerY - runnerSize * .77f), Size(runnerSize * .88f, runnerSize * .73f), CornerRadius(runnerSize * .27f))
+            drawRoundRect(runnerCostume, Offset(x - runnerSize * .39f, runnerY - runnerSize * .73f), Size(runnerSize * .78f, runnerSize * .64f), CornerRadius(runnerSize * .23f))
+            drawRoundRect(Color.White.copy(alpha = .62f), Offset(x - runnerSize * .12f, runnerY - runnerSize * .68f), Size(runnerSize * .13f, runnerSize * .49f), CornerRadius(runnerSize * .06f))
+            drawRoundRect(Color(0xFF28323A), Offset(x - runnerSize * .45f, runnerY - runnerSize * .57f), Size(runnerSize * .12f, runnerSize * .30f), CornerRadius(runnerSize * .04f))
+            drawCircle(Color(0xFF8B572C).copy(alpha = characterAlpha), runnerSize * .42f, Offset(x, runnerY - runnerSize * 1.05f + 1.dp.toPx()))
+            drawCircle(Color(0xFFFFC857).copy(alpha = characterAlpha), runnerSize * .37f, Offset(x, runnerY - runnerSize * 1.05f))
+            drawPath(
+                path = Path().apply {
+                    moveTo(x - runnerSize * .36f, runnerY - runnerSize * 1.02f)
+                    quadraticTo(x - runnerSize * .38f, runnerY - runnerSize * 1.48f, x, runnerY - runnerSize * 1.43f)
+                    quadraticTo(x + runnerSize * .40f, runnerY - runnerSize * 1.40f, x + runnerSize * .36f, runnerY - runnerSize * 1.02f)
+                    close()
+                },
+                color = Color(0xFF49352E).copy(alpha = characterAlpha),
+            )
             drawCircle(Color(0xFF17242C).copy(alpha = characterAlpha), runnerSize * .045f, Offset(x + runnerSize * .15f, runnerY - runnerSize * 1.07f))
+            drawCircle(Color(0xFF17242C).copy(alpha = characterAlpha), runnerSize * .045f, Offset(x - runnerSize * .15f, runnerY - runnerSize * 1.07f))
             val armSwing = if (player.bracing) 0f else gait
             val leftHand = Offset(x - runnerSize * .55f, runnerY - runnerSize * .37f + armSwing)
             val rightHand = Offset(x + runnerSize * .55f, runnerY - runnerSize * .37f - armSwing)
@@ -1377,6 +1894,46 @@ private fun CourseCanvas(
                 CornerRadius(runnerSize * .08f),
             )
             drawRoundRect((if (player.bracing) Color(0xFFB7D9FF) else Color(0xFF252F37)).copy(alpha = characterAlpha), Offset(x + runnerSize * .04f, runnerY - runnerSize * .02f), Size(runnerSize * .34f, runnerSize * .18f), CornerRadius(runnerSize * .08f))
+
+            val playerName = player.name.trim().ifBlank { "Player" }
+            val pingLabel = player.pingMs?.let { "${it}ms" } ?: "—ms"
+            playerPingPaint.color = when {
+                player.pingMs == null -> android.graphics.Color.LTGRAY
+                player.pingMs < 150 -> android.graphics.Color.rgb(119, 224, 181)
+                player.pingMs < 300 -> android.graphics.Color.rgb(255, 209, 102)
+                else -> android.graphics.Color.rgb(255, 133, 133)
+            }
+            val labelPadding = 7.dp.toPx()
+            val labelGap = 6.dp.toPx()
+            val pingWidth = playerPingPaint.measureText(pingLabel)
+            val maxLabelWidth = w * .38f
+            val nameMaxWidth = (maxLabelWidth - labelPadding * 2 - labelGap - pingWidth).coerceAtLeast(12.dp.toPx())
+            var playerLabel = playerName
+            while (playerLabel.length > 1 && playerNamePaint.measureText(playerLabel) > nameMaxWidth) {
+                playerLabel = playerLabel.dropLast(2) + "…"
+            }
+            val nameWidth = playerNamePaint.measureText(playerLabel).coerceAtMost(nameMaxWidth)
+            val labelWidth = (nameWidth + labelPadding * 2 + labelGap + pingWidth).coerceAtMost(maxLabelWidth)
+            val labelHeight = 17.dp.toPx()
+            val labelTop = (runnerY - runnerSize * 2.15f).coerceAtLeast(3.dp.toPx())
+            val labelLeft = (x - labelWidth / 2f).coerceIn(0f, (w - labelWidth).coerceAtLeast(0f))
+            drawRoundRect(
+                color = Color(0xE6102028),
+                topLeft = Offset(labelLeft, labelTop),
+                size = Size(labelWidth, labelHeight),
+                cornerRadius = CornerRadius(8.dp.toPx()),
+            )
+            drawRoundRect(
+                color = costume.copy(alpha = .95f),
+                topLeft = Offset(labelLeft, labelTop),
+                size = Size(2.dp.toPx(), labelHeight),
+                cornerRadius = CornerRadius(2.dp.toPx()),
+            )
+            val labelBaseline = labelTop + (labelHeight - (playerNamePaint.ascent() + playerNamePaint.descent())) / 2f
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawText(playerLabel, labelLeft + labelPadding, labelBaseline, playerNamePaint)
+                canvas.nativeCanvas.drawText(pingLabel, labelLeft + labelPadding + nameWidth + labelGap, labelBaseline, playerPingPaint)
+            }
         }
         val markerX = courseX(team.progress).coerceIn(courseLeft, courseLeft + courseWidth)
         drawCircle(Color(0xFF66E0CB), 7.dp.toPx(), Offset(markerX, trackY))

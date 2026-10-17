@@ -1,4 +1,5 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createServer } from 'node:http';
 import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ if (missingEnvironment.length > 0) {
 }
 
 const app = express();
+const server = createServer(app);
 const port = Number(process.env.PORT || 3000);
 const roomCodeLifetimeMs = 12 * 60 * 60 * 1000;
 const maximumParticipants = 10;
@@ -108,7 +110,7 @@ app.get('/health', (_request, response) => response.json({ ok: true }));
 // Mount the game feature independently. Its simulation is separate from the
 // LiveKit voice-room session and keeps running while the foreground voice
 // service maintains audio on Android.
-mountRopeboundRoutes(app, ropebound, requireRoomParticipant);
+mountRopeboundRoutes(app, ropebound, requireRoomParticipant, server);
 
 app.post('/rooms/create', async (request, response) => {
   const roomName = readText(request.body?.roomName, 40);
@@ -186,7 +188,7 @@ app.use((error, _request, response, _next) => {
   return response.status(500).json({ error: 'Something went wrong. Try again.' });
 });
 
-app.listen(port, '0.0.0.0', () => {
+server.listen(port, '0.0.0.0', () => {
   console.log(`SquadVoice token server listening on port ${port}`);
 });
 

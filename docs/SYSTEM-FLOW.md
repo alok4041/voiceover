@@ -9,14 +9,13 @@ For detailed current rules and actual-vs-planned mechanics, read `docs/ROPEBOUND
 ```mermaid
 flowchart LR
     P[Player] -->|visits / downloads| WEB[GitHub Pages website\nalok4041.github.io/voiceover]
-    WEB -->|fetches release list / links APK| REL[GitHub Releases\napp-debug.apk]
+    WEB -->|fetches release list / links APK| REL[GitHub Releases\nSquadVoice-version.apk]
     REL -->|installs| APP[SquadVoice Android app\nKotlin + Jetpack Compose]
 
     APP -->|create/join room\nHTTPS API request| API[Render service\nSquadVoice token + game API]
     API -->|room code + LiveKit token| APP
     APP -->|WebRTC voice audio| LK[LiveKit server]
-    APP -->|Ropebound game actions\nroom code + participant token| API
-    API -->|game state / events| APP
+    APP <-->|Ropebound controls, snapshots, ping\nauthenticated WebSocket| API
 ```
 
 ## What gets published where
@@ -25,7 +24,7 @@ flowchart LR
 flowchart TD
     SRC[GitHub repo\nalok4041/voiceover]
     SRC -->|app/ source| BUILD[Build Android APK\n./gradlew :app:assembleDebug]
-    BUILD -->|upload asset app-debug.apk| RELEASE[GitHub Release\nversion tag e.g. v1.2.4]
+    BUILD -->|upload asset SquadVoice-v1.2.5.apk| RELEASE[GitHub Release\nversion tag v1.2.5]
     RELEASE -->|website queries GitHub Releases| SITE[GitHub Pages\npublic download page]
 
     SRC -->|token-server/ source| RENDER[Render web service\nAPI + game routes + hosted site copy]
@@ -42,8 +41,8 @@ The repository source is the shared origin, but publishing is a separate action 
 2. Android app calls the Render API to create or join a voice room.
 3. Render validates the request, creates/restores the room, and returns the room code, LiveKit server URL, and participant token.
 4. Android connects to LiveKit for voice. Voice audio is sent directly between the app and LiveKit; it does not go through the Render API.
-5. For Ropebound, Android separately sends game actions to Render. Game requests must include the six-character `roomCode` and participant token. The Render routes authenticate the room participant and call the game simulation in `token-server/ropebound/game-core.js`.
-6. Render returns updated game state/events for the Android game screen.
+5. Ropebound lobby actions use HTTP. During play, Android opens an authenticated WebSocket to Render and sends controls and ping probes while receiving authoritative game snapshots. The Render routes authenticate the room participant and call the simulation in `token-server/ropebound/game-core.js`.
+6. Render streams updated game snapshots over the WebSocket to Android.
 
 ## Code-to-runtime map
 
@@ -56,7 +55,7 @@ The repository source is the shared origin, but publishing is a separate action 
 | Authoritative game simulation/hazards | `token-server/ropebound/game-core.js` | Render service |
 | Public download page | `index.html` | GitHub Pages |
 | Render-hosted copy of download page | `token-server/public/index.html` | Render service root `/` |
-| APK download | GitHub Release asset named `app-debug.apk` | Linked from the website |
+| APK download | GitHub Release asset named `SquadVoice-v1.2.5.apk` | Linked from the website |
 
 ## Current project endpoints
 

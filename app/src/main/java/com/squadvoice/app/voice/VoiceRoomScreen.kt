@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.squadvoice.app.BuildConfig
 import kotlin.math.roundToInt
 
 @Composable
@@ -60,6 +61,7 @@ internal fun VoiceRoomScreen(
     overlayEnabled: Boolean,
     onOpenSettings: () -> Unit,
     onPlayRopebound: () -> Unit,
+    onOpenLocalPreview: () -> Unit,
     onToggleMicrophone: () -> Unit,
     onSetMicrophone: (Boolean) -> Unit,
     onSetParticipantVolume: (String, Int) -> Unit,
@@ -118,6 +120,21 @@ internal fun VoiceRoomScreen(
             fontSize = 11.sp,
             color = MutedText,
         )
+        if (BuildConfig.DEBUG) {
+            OutlinedButton(
+                onClick = onOpenLocalPreview,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text("Preview playground · 4 local demo runners")
+            }
+            Text(
+                "Visual preview only. Live multiplayer still requires four connected players.",
+                modifier = Modifier.padding(horizontal = 4.dp),
+                fontSize = 10.sp,
+                color = MutedText,
+            )
+        }
 
         Row(
             modifier = Modifier

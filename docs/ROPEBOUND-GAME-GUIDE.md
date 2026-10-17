@@ -15,22 +15,21 @@ flowchart LR
     Race -->|finish, rescues exhausted, or team leaves| Results[Results]
     Results -->|host rematch| Lobby
     Lobby -->|back / exit| VoiceRoom
-    Phone[Android controls] -->|input + roomCode + participant token| Server[Render game API + simulation]
-    Server -->|SSE snapshots| Phone
+    Phone[Android controls] <-->|WebSocket snapshots, input, ping + room JWT| Server[Render game API + simulation]
 ```
 
 ## 2. Source of truth and implementation boundary
 
 ### Server owns gameplay rules
 
-`token-server/ropebound/game-core.js` owns team state, race phase, movement, jump/gravity, rope constraints, hazard collisions, checkpoints, rescues, surge, progress, and winner selection. `token-server/ropebound/routes.js` exposes those actions over HTTP and streams snapshots. `token-server/server.js` authenticates the existing LiveKit participant token and mounts the game routes.
+`token-server/ropebound/game-core.js` owns team state, race phase, movement, jump/gravity, rope constraints, hazard collisions, checkpoints, rescues, surge, progress, and winner selection. `token-server/ropebound/routes.js` exposes lobby actions over HTTP and uses one authenticated WebSocket for game inputs, snapshots, and latency probes. `token-server/server.js` authenticates the existing LiveKit participant token and mounts the game routes.
 
 The client must send **inputs only**. It must not send or be trusted for positions, scores, checkpoints, teams, or win claims. The server calculates those values and returns snapshots. Keep this authority boundary when changing movement or adding mechanics.
 
 ### Android renders and controls
 
 - `app/src/main/java/com/squadvoice/app/game/RopeboundGameScreen.kt` — lobby/race/results UI, landscape game view, canvas, controls, snapshot handling.
-- `app/src/main/java/com/squadvoice/app/game/RopeboundApi.kt` — HTTP/SSE client and JSON-to-model parsing.
+- `app/src/main/java/com/squadvoice/app/game/RopeboundApi.kt` — HTTP lobby actions, authenticated game WebSocket, and JSON-to-model parsing.
 - `app/src/main/java/com/squadvoice/app/game/RopeboundGameAudio.kt` — local game sounds and ambience.
 - `app/src/main/java/com/squadvoice/app/MainActivity.kt` — enters/exits Ropebound from the voice room, preserves the session, and requests landscape orientation while the game is open.
 
@@ -137,7 +136,9 @@ The current Compose lobby shows Team A/B roster, host, ready state, ping, team s
 
 ### Race
 
-The current landscape Compose screen draws the course and players with `Canvas`, follows the local player's team with a camera, draws teammate rope links, shows team/rival progress, rope tension, next/active hazard, surge/rescue indicators, notices/errors, mic/settings/back-to-voice controls, and large touch controls. It does not show the opponent's runner positions.
+The landscape Compose screen keeps the HUD, voice/settings actions, errors, and touch controls in Compose. The playfield is rendered as a perspective 3D scene by `Ropebound3DScene.kt` using Android OpenGL ES 2.0. A compact FOLLOW/TOP toggle smoothly transitions between a trailing third-person camera and an overhead view. The scene builds low-poly 3D terrain, a layered sky and mountain backdrop, volumetric clouds, grass, trees, characters, obstacles, flowing water with moving wave highlights and riverbank details, fire, and a single gently sagging rope bridge. Bridge planks and rails flex in response to nearby player movement and jumping. Runner models have shaped clothing, facial features, shoes, packs, and harnesses; a flexible-looking rope is drawn from each harness along the team's rope chain, while server rope constraints remain authoritative for gameplay. Player progress is normalized to 0–1 in snapshots, while obstacle and checkpoint positions use course meters; convert between those units when positioning scene elements. Name and ping badges are projected above visible teammates and move with the camera. The scene does not show opponent runner positions. Movement, jump, and brace controls use compact 56dp touch targets. Race errors use a dismissible bottom banner; the old central next-hazard panel is removed.
+
+Water ripples, grass sway, bridge flex, fire flicker, embers, and runner motion are client-side render effects. The geometry is procedural and follows the server-provided obstacle spans, so randomized course placement remains aligned. Collision, course positions, progress, and recovery remain server-authoritative. Canva output is only a visual reference and is not placed in the game as a flat background or sprite.
 
 Controls: hold backward, hold forward, tap jump, hold brace. Audio cues and ambience are local assets under `app/src/main/res/raw/` and managed by `RopeboundGameAudio.kt`; game audio uses Android's game/media route so it does not replace the LiveKit voice call route.
 
@@ -153,18 +154,18 @@ Every game request authenticates with the existing LiveKit participant JWT in `A
 | --- | --- | --- |
 | `/games/join` | POST | Join/create the in-memory game lobby for the voice room; returns initial snapshot. |
 | `/games/state?roomCode=...` | GET | Fetch one current snapshot. |
-| `/games/events?roomCode=...` | GET/SSE | Stream `data: {snapshot}` about every 100ms. |
-| `/games/heartbeat` | POST | Keep player online and optionally report ping. |
+| `/games/realtime?roomCode=...` | WebSocket | Authenticated game channel; streams snapshots about every 100ms and accepts `ping` and `input` JSON messages. |
+| `/games/heartbeat` | POST | Legacy HTTP heartbeat retained for compatibility; current Android game uses the WebSocket ping message once per second. |
 | `/games/team` | POST | Choose a team in lobby. |
 | `/games/team-switching` | POST | Host toggles free team switching. |
 | `/games/swap-team` | POST | Swap two players from opposite teams in lobby. |
 | `/games/ready` | POST | Set current player's ready state. |
 | `/games/start` | POST | Host starts a valid, ready lobby. |
-| `/games/input` | POST | Send `seq`, `move`, `jump`, `brace` while racing. |
+| `/games/input` | POST | Legacy HTTP input retained for compatibility; current Android game sends `seq`, `move`, `jump`, `brace` over the WebSocket. |
 | `/games/rematch` | POST | Host resets the results match to lobby. |
 | `/games/leave` | POST | Leave/remove the player. |
 
-For body-based game actions, `roomCode` must be included in the JSON body. `/games/state` and `/games/events` use the `roomCode` query parameter. Keep the room code and bearer token aligned: voice-room connection does not implicitly authorize a separate game HTTP request.
+For REST lobby actions, `roomCode` must be included in the JSON body. `/games/state` and `/games/realtime` use the `roomCode` query parameter. The WebSocket sends the same participant JWT in its `Authorization` header. Keep the room code and bearer token aligned: voice-room connection does not implicitly authorize a separate game connection. WebSockets reduce repeated HTTP request overhead for frequent game messages; they cannot remove latency caused by the player's distance from the Render region or a sleeping free instance.
 
 Snapshots include phase, both teams' counts and aggregate progress, viewer team/host/spectator state, checkpoints, winner, notice, hazard hint, temporary effect, obstacle definitions, duration, and surge counts. During a race, each viewer receives full runner/rope/spectator details only for their own team; the other team's individual runner positions are omitted. This is a privacy boundary—preserve it when adding snapshot fields.
 
