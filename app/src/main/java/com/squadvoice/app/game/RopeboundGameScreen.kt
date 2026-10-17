@@ -1,7 +1,9 @@
 package com.squadvoice.app.game
 
+import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.compose.foundation.Canvas
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -719,6 +721,7 @@ private fun RaceContent(
     val ownTeam = if (state.viewerTeam == "A") state.teamA else state.teamB
     val otherTeam = if (state.viewerTeam == "A") state.teamB else state.teamA
     var playgroundReady by remember { mutableStateOf(false) }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val loadingAnimation = rememberInfiniteTransition(label = "playground-loading")
     val logoPulse by loadingAnimation.animateFloat(
         initialValue = .96f,
@@ -853,19 +856,38 @@ private fun RaceContent(
                 )
             }
         } else {
+            // Controls are split so thumbs can reach them comfortably:
+            // left side = movement (Backward / Forward), right side = Jump (primary) + Brace.
+            // Every touch target is at least 48dp x 48dp for reliable finger taps.
+            val bottomPadding = if (isLandscape) 20.dp else 14.dp
             Row(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = bottomPadding),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                HoldMoveButton("◀ Backward", -1, Modifier.weight(1f).height(58.dp), onMove)
-                HoldMoveButton("Forward ▶", 1, Modifier.weight(1f).height(58.dp), onMove)
-                Button(
-                    onClick = onJump,
-                    modifier = Modifier.weight(1f).height(58.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66E0CB), contentColor = Color(0xFF082521)),
-                ) { Text("Jump ↑", fontWeight = FontWeight.Bold) }
-                HoldBraceButton(onBrace, Modifier.weight(1f).height(58.dp))
+                // Left corner: movement buttons stacked vertically
+                Column(
+                    modifier = Modifier.width(120.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HoldMoveButton("◀", -1, Modifier.height(56.dp).width(56.dp), onMove)
+                    HoldMoveButton("Forward ▶", 1, Modifier.height(56.dp).fillMaxWidth(), onMove)
+                }
+                // Right side: Jump (prominent) + Brace stacked vertically
+                Column(
+                    modifier = Modifier.width(160.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = onJump,
+                        modifier = Modifier.height(56.dp).fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66E0CB), contentColor = Color(0xFF082521)),
+                    ) { Text("Jump ↑", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                    HoldBraceButton(onBrace, Modifier.height(56.dp).fillMaxWidth())
+                }
             }
         }
 
@@ -1150,17 +1172,19 @@ private fun CourseCanvas(
         drawRect(Color(0xFF17242C), Offset(pitLeft, groundY - 2.dp.toPx()), Size(pitRight - pitLeft, h * .22f))
         drawRect(Color(0xFF1B2930), Offset(pitLeft - 5.dp.toPx(), groundY - 4.dp.toPx()), Size(5.dp.toPx(), h * .06f))
         drawRect(Color(0xFF1B2930), Offset(pitRight, groundY - 4.dp.toPx()), Size(5.dp.toPx(), h * .06f))
-        // Keep the spike teeth visibly below the ground line so jumps stay readable.
+        // Spike teeth are drawn taller and below the ground line so the jumpable
+        // gap stays readable at a glance. Caution color contrasts with the dark course.
         val spikeCount = 8
         repeat(spikeCount) { index ->
             val spikeWidth = (pitRight - pitLeft) / spikeCount
             val spikeX = pitLeft + spikeWidth * index
+            val gap = spikeWidth * .12f
             drawPath(Path().apply {
-                moveTo(spikeX, groundY + h * .135f)
-                lineTo(spikeX + spikeWidth * .5f, groundY + h * .085f)
-                lineTo(spikeX + spikeWidth, groundY + h * .135f)
+                moveTo(spikeX + gap, groundY + h * .18f)
+                lineTo(spikeX + spikeWidth * .5f, groundY + h * .06f)
+                lineTo(spikeX + spikeWidth - gap, groundY + h * .18f)
                 close()
-            }, Color(0xFFE5DCE6))
+            }, Color(0xFFFFB45F))
         }
 
         // Rivers are painted around each shuffled water obstacle so every route
@@ -1276,7 +1300,7 @@ private fun CourseCanvas(
             drawRect(if ((index + index / 2) % 2 == 0) Color.White else Color(0xFF263238), Offset(checkerX, checkerY), Size(h * .03f, h * .055f))
         }
 
-        val runnerSize = (w * .035f).coerceIn(13.dp.toPx(), 25.dp.toPx())
+        val runnerSize = (w * .075f).coerceIn(28.dp.toPx(), 50.dp.toPx())
         val trackY = h * .12f
         drawLine(Color(0xFF65847D), Offset(courseLeft, trackY), Offset(courseLeft + courseWidth, trackY), strokeWidth = 4.dp.toPx())
         animatedPlayers.forEachIndexed { index, player ->

@@ -2,6 +2,8 @@
 
 Use this diagram as a quick map before editing or deploying. The website, Android app, API server, and LiveKit voice service are separate pieces.
 
+For detailed current rules and actual-vs-planned mechanics, read `docs/ROPEBOUND-GAME-GUIDE.md`. For repo state and deployment details, read `docs/HANDOFF.md`.
+
 ## What players use
 
 ```mermaid

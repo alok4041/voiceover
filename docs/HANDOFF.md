@@ -6,11 +6,11 @@ This file is a working handoff for an agent continuing the app, token-server, we
 
 - GitHub repository: <https://github.com/alok4041/voiceover>
 - Default branch observed locally: `main`
-- Current local HEAD when this handoff was written: `f41b796` (`fix: refresh website APK release fallback`)
+- Current HEAD when this handoff was updated: `aff5302` (`bug fixses`), matching `origin/main`.
 - Android download website: <https://alok4041.github.io/voiceover/>
 - Render token/game API URL: <https://squadvoice-api-alok1404-251015-0109.onrender.com>
 - Render health check: <https://squadvoice-api-alok1404-251015-0109.onrender.com/health>
-- Latest Git tag observed: `v1.2.3`; current uncommitted Android version is `1.2.4` / version code `16`.
+- Latest Git tag observed: `v1.2.3`; the committed Android version is `1.2.4` / version code `16`. No `v1.2.4` release tag was observed.
 
 SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio; a Node.js/Express server issues room codes and LiveKit tokens and also serves the Ropebound game API. The website is a separate GitHub Pages deployment. The Render service also serves `token-server/public/index.html` at `/`.
 
@@ -28,6 +28,7 @@ SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio
 - `token-server/public/index.html` — Render-served copy of the download site.
 - `index.html` — GitHub Pages download site.
 - `docs/ropebound-design.md` — game design reference.
+- `docs/ROPEBOUND-GAME-GUIDE.md` — current game rules, API contract, actual-vs-planned behavior, and guidance for independent gameplay changes.
 - `docs/SYSTEM-FLOW.md` — Mermaid diagrams for player/runtime flow and where each part is published.
 - `README.md` — development setup; some URL guidance is stale (see below).
 
@@ -77,22 +78,19 @@ npm start
 
 The local token server listens on port 3000 by default. Its health check is `/health`. No `AGENTS.md` instruction file was found in the checked repository paths when this guide was prepared.
 
-## Current local changes (not committed)
+## Current source and local changes
 
-At handoff, `git status --short` showed these modified files:
+The v1.2.4 fixes for the `/games/input` room-code body, dismissible game errors, runner ground anchor/rope drawing, and shorter server hazard spans are committed in `aff5302` on `main` and were observed matching `origin/main`.
 
-- `app/build.gradle.kts` — version changed from `1.2.3` / code `15` to `1.2.4` / code `16`.
-- `app/src/main/java/com/squadvoice/app/game/RopeboundApi.kt` — includes `roomCode` in the JSON body for `/games/input`.
-- `app/src/main/java/com/squadvoice/app/game/RopeboundGameScreen.kt` — adds a dismiss button for the game error; makes spike teeth shorter; moves the runner drawing anchor to put the shoes on the ground; adjusts rope endpoints.
-- `token-server/ropebound/game-core.js` — shortens pit, boulder, bridge, river, wind, and lava hazard spans to make the course more manageable.
+The room-code fix addresses the screenshot error “Enter a valid six-character voice room code.” Voice chat can already be connected while the game API separately rejects input: the game route reads `roomCode` from the request body to validate the participant's room.
 
-The room-code fix addresses the screenshot error “Enter a valid six-character voice room code.” Voice chat can already be connected while the game API separately rejects input: the Android `/games/input` request previously omitted `roomCode`, which the server needs to validate the room participant. The server hazard changes only take effect after deploying the updated token-server source to Render.
+At the time this guide was updated, the worktree also had an uncommitted change in `app/src/main/java/com/squadvoice/app/game/RopeboundGameScreen.kt`: the touch-control layout is rearranged for landscape, and the drawn spike teeth are orange/taller with small gaps. The latest edits to `HANDOFF.md` and `SYSTEM-FLOW.md`, plus the new `ROPEBOUND-GAME-GUIDE.md`, are local and uncommitted. Inspect `git status --short` and `git diff` before working; do not overwrite these edits. The shorter server hazard spans are already in `main`, but only affect players after the corresponding source is running on Render.
 
-The screenshot also showed the player character floating above the course and spike obstacles too long/close for comfortable jumping. The local Compose and game-core changes above target those reports. Confirm the actual feel in a fresh Android build and on-device play before publishing.
+The reported issues were the room-code error, a non-dismissible message, spikes that felt too hard to clear, and a runner drawn above the ground. Rebuild and play on a physical phone to assess the pending screen adjustments before publishing an APK.
 
 ### Transfer warning for a separate agent
 
-The four code changes and the two handoff documents are currently only in this local working tree; they are not on GitHub `main`. An agent using this same checkout can read them immediately. An agent that only clones GitHub will see the pre-fix code. To preserve the current work, either give the new agent access to this checkout or transfer the local `git diff` plus the two new Markdown documents. Do not overwrite or reset this working tree before transferring it.
+The main v1.2.4 code fixes and the original handoff/system-flow docs are on GitHub `main`. The extra screen adjustment, latest edits to those docs, and new game guide are only in this local working tree. An agent using this same checkout can read them immediately; an agent that only clones GitHub will miss those pending local edits/files. Give it access to this checkout or transfer the local screen `git diff` and current Markdown docs. Do not overwrite or reset this working tree before transferring it.
 
 ## Build and URL behavior
 
@@ -116,7 +114,7 @@ To override the server URL for one build:
 ./gradlew :app:assembleDebug -PTOKEN_SERVER_URL=https://your-server.example
 ```
 
-The debug APK output is `app/build/outputs/apk/debug/app-debug.apk`. At the preceding turn, that APK had been built successfully with the Render URL; rebuild after any source changes before sharing it. Check the generated `BuildConfig` or APK before release to verify the embedded endpoint. Never put LiveKit API secrets in Android code, Gradle properties, or the APK.
+The debug APK output is `app/build/outputs/apk/debug/app-debug.apk`. A debug APK for the prior v1.2.4 source was built successfully with the Render URL, but the APK may not include the latest uncommitted screen adjustments. Rebuild after source changes before sharing it. Check the generated `BuildConfig` or APK before release to verify the embedded endpoint. Never put LiveKit API secrets in Android code, Gradle properties, or the APK.
 
 **README mismatch:** `README.md` still says the default URL is `http://10.0.2.2:3000`, but the current Gradle build default and root property point to Render. The README example for a local phone build is still useful when intentionally running a local server. Update documentation only when it is in scope and keep the emulator-vs-phone distinction clear.
 
@@ -156,14 +154,14 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 
 ## Recommended continuation checklist
 
-1. Start with `git status --short` and `git diff`; preserve the four in-progress files listed above.
+1. Start with `git status --short` and `git diff`; preserve the current screen adjustment and local documentation.
 2. Read `docs/ropebound-design.md`, `token-server/ropebound/routes.js`, and the relevant game UI/API code before changing behavior.
 3. Confirm the Render service is healthy and its environment variables are configured without exposing secret values.
 4. Review whether the latest local game changes are correct, then build and install a fresh APK on a physical phone. Confirm the BuildConfig URL is the Render HTTPS endpoint.
-5. Deploy the token-server hazard changes to Render only after the user authorizes deployment; confirm `/health` and game API behavior.
+5. Check whether the pushed token-server changes are live on Render. If not, deploy only after the user authorizes it; confirm `/health` and game API behavior.
 6. Publish the APK/site release only after the user authorizes it; update the GitHub Release and, if required, both static website fallback blocks.
 7. Report exactly what was changed, tested, deployed, and left pending.
 
 ## Copy-paste prompt for the next agent
 
-> Continue the SquadVoice work in `/Users/alok1404/voiceover`. First read `docs/HANDOFF.md`, then inspect `git status --short` and `git diff` without discarding existing edits. The user reported: the Ropebound game asks for a valid six-character voice room code even while in a room, the error cannot be dismissed, spikes/hazards feel too long and too close, and the character appears above the ground. The current uncommitted v1.2.4 changes are intended to fix these. The Render URL is `https://squadvoice-api-alok1404-251015-0109.onrender.com`; the phone APK must not use `10.0.2.2`. Review and complete the code/build/on-device validation work, but do not push, create a release, upload an APK, or deploy to Render until the user explicitly authorizes those external changes. Keep LiveKit secrets private. Use `README.md` and `docs/ropebound-design.md` for more context, and verify live Render/GitHub dashboard state rather than assuming it from old screenshots.
+> Continue the SquadVoice work in `/Users/alok1404/voiceover`. First read `docs/HANDOFF.md`, `docs/SYSTEM-FLOW.md`, and `docs/ROPEBOUND-GAME-GUIDE.md`, then inspect `git status --short` and `git diff` without discarding existing edits. The room-code, error-dismissal, runner-grounding, and shortened-hazard fixes are committed in `aff5302` on `main`; the worktree also contains an uncommitted screen adjustment and local docs. Preserve them. The Render URL is `https://squadvoice-api-alok1404-251015-0109.onrender.com`; a physical phone APK must not use `10.0.2.2`. Rebuild and validate on a phone before release. Do not create a release, upload an APK, or deploy to Render until the user explicitly authorizes those external changes. Keep LiveKit secrets private. Use `README.md` and `docs/ropebound-design.md` for more context, and verify live Render/GitHub dashboard state instead of assuming it from old screenshots.
