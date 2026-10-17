@@ -1,6 +1,6 @@
 const MAX_PLAYERS = 10;
 const MAX_PER_TEAM = 5;
-const MIN_PER_TEAM_TO_START = 1;
+const MIN_PER_TEAM_TO_START = 2;
 const COURSE_LENGTH = 100;
 const MAX_ROPE_GAP = 7.5;
 const TEAM_START_SPACING = MAX_ROPE_GAP / (MAX_PER_TEAM - 1);
@@ -172,11 +172,56 @@ export class RopeboundGameCore {
     if (!player.online || !player.inRace) throw new GameError('Reconnect before changing teams.', 'player_offline');
     if (team !== 'A' && team !== 'B') throw new GameError('Choose team A or B.', 'invalid_team');
     if (player.team === team) return this.snapshot(room.code, player.id);
+    if (player.id !== room.hostId && !room.freeTeamSwitching) {
+      throw new GameError('Ask the host to enable free team switching first.', 'team_switching_disabled');
+    }
+    if (teamSize(room, player.team) <= MIN_PER_TEAM_TO_START) {
+      throw new GameError('Keep at least two players on each team. Swap with a player instead.', 'team_minimum');
+    }
     if (teamSize(room, team) >= MAX_PER_TEAM) throw new GameError('That team is full.', 'team_full');
     player.team = team;
     player.ready = false;
     room.updatedAt = Date.now();
     return this.snapshot(room.code, player.id);
+  }
+
+  setFreeTeamSwitching(roomCode, identity, enabled) {
+    const room = this.#requireRoom(roomCode);
+    const player = this.#requirePlayer(room, identity);
+    if (room.phase !== 'lobby') throw new GameError('Teams are locked after the race starts.', 'teams_locked');
+    if (room.hostId !== player.id) throw new GameError('Only the game host can change team-switching settings.', 'host_required');
+    room.freeTeamSwitching = Boolean(enabled);
+    room.notice = room.freeTeamSwitching
+      ? 'Free team switching is on. Players can swap with someone on the other team.'
+      : 'Free team switching is off. The host can still arrange team swaps.';
+    room.updatedAt = Date.now();
+    return this.snapshot(room.code, player.id);
+  }
+
+  swapTeams(roomCode, identity, firstPlayerId, secondPlayerId) {
+    const room = this.#requireRoom(roomCode);
+    const actor = this.#requirePlayer(room, identity);
+    const firstPlayer = this.#requirePlayer(room, firstPlayerId);
+    const secondPlayer = this.#requirePlayer(room, secondPlayerId);
+    if (room.phase !== 'lobby') throw new GameError('Teams are locked after the race starts.', 'teams_locked');
+    if (!actor.online || !actor.inRace || !firstPlayer.online || !firstPlayer.inRace ||
+        !secondPlayer.online || !secondPlayer.inRace) {
+      throw new GameError('Only connected lobby players can switch teams.', 'player_offline');
+    }
+    if (actor.id !== room.hostId && (!room.freeTeamSwitching || firstPlayer.id !== actor.id)) {
+      throw new GameError('Only the host can arrange other players. Ask the host to enable free team switching to switch yourself.', 'team_switching_disabled');
+    }
+    if (firstPlayer.id === secondPlayer.id) throw new GameError('Choose two different players to swap.', 'invalid_team_swap');
+    if (firstPlayer.team === secondPlayer.team) throw new GameError('Choose players from opposite teams.', 'invalid_team_swap');
+
+    const previousTeam = firstPlayer.team;
+    firstPlayer.team = secondPlayer.team;
+    secondPlayer.team = previousTeam;
+    firstPlayer.ready = false;
+    secondPlayer.ready = false;
+    room.notice = `${firstPlayer.name} and ${secondPlayer.name} swapped teams.`;
+    room.updatedAt = Date.now();
+    return this.snapshot(room.code, actor.id);
   }
 
   setReady(roomCode, identity, ready) {
@@ -196,7 +241,7 @@ export class RopeboundGameCore {
     if (room.hostId !== cleanText(identity, 128)) throw new GameError('Only the game host can start the race.', 'host_required');
     const teams = ['A', 'B'].map((team) => teamPlayers(room, team));
     if (teams.some((members) => members.length < MIN_PER_TEAM_TO_START)) {
-      throw new GameError('Put at least one runner on each team before starting.', 'teams_not_ready');
+      throw new GameError('At least two connected runners are required on each team before starting.', 'teams_not_ready');
     }
     if (teams.some((members) => members.some((player) => !player.ready))) {
       throw new GameError('Everyone must be ready before the host starts.', 'players_not_ready');
@@ -469,6 +514,7 @@ export class RopeboundGameCore {
       viewerTeam: ownTeam ?? null,
       viewerSpectating: room.phase === 'race' && viewer != null && !viewer.inRace,
       isHost: viewerIdentity != null && room.hostId === cleanText(viewerIdentity, 128),
+      freeTeamSwitching: room.freeTeamSwitching,
       checkpoints: { ...room.checkpoints },
       winner: room.winner,
       notice: room.notice,
@@ -677,6 +723,7 @@ function createRoom(code) {
     surges: { A: 0, B: 0 },
     rescues: { A: TEAM_RESCUES_PER_RACE, B: TEAM_RESCUES_PER_RACE },
     hostId: null,
+    freeTeamSwitching: false,
     winner: null,
     notice: 'Waiting for teams to ready up.',
     effectSequence: 0,

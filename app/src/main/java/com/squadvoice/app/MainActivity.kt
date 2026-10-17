@@ -110,20 +110,25 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.withFrameNanos
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    private val roomInviteCodes = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        roomInviteCodes.value = readInviteRoomCode(intent)
         val preferences = getSharedPreferences("squadvoice", MODE_PRIVATE)
         val initialDarkMode = preferences.getBoolean("dark_mode", true)
         val initialAccentTheme = preferences.getString("accent_theme", "teal") ?: "teal"
         val initialMicNoiseMode = MicNoiseMode.fromPreferences(preferences)
         applySystemBarTheme(true)
         setContent {
+            val incomingInviteCode by roomInviteCodes.collectAsState()
             var darkMode by rememberSaveable { mutableStateOf(preferences.getBoolean("dark_mode", true)) }
             var accentTheme by rememberSaveable {
                 mutableStateOf(preferences.getString("accent_theme", initialAccentTheme) ?: initialAccentTheme)
@@ -142,6 +147,8 @@ class MainActivity : ComponentActivity() {
                         darkMode = darkMode,
                         accentTheme = accentTheme,
                         micNoiseMode = micNoiseMode,
+                        incomingInviteCode = incomingInviteCode,
+                        onInviteHandled = { roomInviteCodes.value = null },
                         onSetDarkMode = { selectedDarkMode ->
                             darkMode = selectedDarkMode
                             preferences.edit().putBoolean("dark_mode", darkMode).apply()
@@ -166,6 +173,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        roomInviteCodes.value = readInviteRoomCode(intent)
     }
 
     private fun applySystemBarTheme(darkMode: Boolean) {
@@ -340,6 +353,8 @@ private fun SquadVoiceApp(
     darkMode: Boolean,
     accentTheme: String,
     micNoiseMode: MicNoiseMode,
+    incomingInviteCode: String?,
+    onInviteHandled: () -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
     onSetMicNoiseMode: (MicNoiseMode) -> Unit,
@@ -609,6 +624,23 @@ private fun SquadVoiceApp(
             } finally {
                 isLoading = false
             }
+        }
+    }
+
+    LaunchedEffect(incomingInviteCode) {
+        val code = incomingInviteCode ?: return@LaunchedEffect
+        joinCode = code
+        onInviteHandled()
+        if (isInRoom) {
+            errorMessage = "Leave your current room before joining this invite."
+            return@LaunchedEffect
+        }
+        if (playerName.isBlank()) {
+            errorMessage = "Invite ready. Add your name, then tap Join room."
+            return@LaunchedEffect
+        }
+        withMicrophonePermission {
+            startRoom { api.joinRoom(code, playerName.trim()) }
         }
     }
 
@@ -1499,15 +1531,36 @@ private fun ErrorNotice(message: String) {
     }
 }
 
+private const val ROOM_INVITE_HOST = "squadvoice-api-alok1404-251015-0109.onrender.com"
+
+private fun readInviteRoomCode(intent: Intent?): String? {
+    val uri = intent?.data ?: return null
+    val validHost = uri.host.equals(ROOM_INVITE_HOST, ignoreCase = true)
+    val isHttpsInvite = uri.scheme.equals("https", ignoreCase = true) && validHost && uri.path == "/join"
+    val isAppSchemeInvite = uri.scheme.equals("squadvoice", ignoreCase = true) && uri.host == "join"
+    if (!isHttpsInvite && !isAppSchemeInvite) return null
+    return uri.getQueryParameter("code")
+        ?.trim()
+        ?.uppercase()
+        ?.takeIf { it.matches(Regex("^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$")) }
+}
+
 private fun copyRoomCode(context: Context, code: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
     clipboard.setPrimaryClip(ClipData.newPlainText("SquadVoice room code", code))
 }
 
 private fun shareRoomCode(context: Context, code: String) {
+    val inviteLink = Uri.parse("${BuildConfig.TOKEN_SERVER_URL.trimEnd('/')}/join")
+        .buildUpon()
+        .appendQueryParameter("code", code)
+        .build()
     val sendIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, "Join my SquadVoice room with code $code")
+        putExtra(
+            Intent.EXTRA_TEXT,
+            "Join my SquadVoice voice room:\n$inviteLink\nRoom code: $code\nIf SquadVoice isn't installed, get it here: https://alok4041.github.io/voiceover/",
+        )
     }
     context.startActivity(Intent.createChooser(sendIntent, "Invite your squad"))
 }

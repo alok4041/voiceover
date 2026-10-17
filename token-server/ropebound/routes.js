@@ -31,6 +31,20 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
     return response.json(ropebound.chooseTeam(roomCode, participant.identity, request.body?.team));
   });
 
+  app.post('/games/team-switching', (request, response) => {
+    const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
+    const participant = requireRoomParticipant(request, roomCode);
+    return response.json(ropebound.setFreeTeamSwitching(roomCode, participant.identity, request.body?.enabled));
+  });
+
+  app.post('/games/swap-team', (request, response) => {
+    const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
+    const participant = requireRoomParticipant(request, roomCode);
+    const firstPlayerId = readText(request.body?.playerId, 128);
+    const secondPlayerId = readText(request.body?.otherPlayerId, 128);
+    return response.json(ropebound.swapTeams(roomCode, participant.identity, firstPlayerId, secondPlayerId));
+  });
+
   app.post('/games/ready', (request, response) => {
     const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
     const participant = requireRoomParticipant(request, roomCode);

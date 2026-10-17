@@ -3,6 +3,8 @@ package com.squadvoice.app.game
 import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +27,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Slider
@@ -35,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -386,7 +390,14 @@ internal fun RopeboundGameScreen(
                         busy = busy,
                         error = error,
                         ready = ownPlayer?.ready ?: false,
+                        viewerIdentity = identity,
                         onChooseTeam = { team -> action { api.chooseTeam(roomCode, participantToken, team) } },
+                        onSetFreeTeamSwitching = { enabled ->
+                            action { api.setFreeTeamSwitching(roomCode, participantToken, enabled) }
+                        },
+                        onSwapPlayers = { playerId, otherPlayerId ->
+                            action { api.swapPlayers(roomCode, participantToken, playerId, otherPlayerId) }
+                        },
                         onReady = { ready -> action { api.setReady(roomCode, participantToken, ready) } },
                         onStart = { action { api.start(roomCode, participantToken) } },
                     )
@@ -465,17 +476,72 @@ private fun LobbyContent(
     busy: Boolean,
     error: String?,
     ready: Boolean,
+    viewerIdentity: String,
     onChooseTeam: (String) -> Unit,
+    onSetFreeTeamSwitching: (Boolean) -> Unit,
+    onSwapPlayers: (String, String) -> Unit,
     onReady: (Boolean) -> Unit,
     onStart: () -> Unit,
 ) {
+    var swapSelection by remember { mutableStateOf<Pair<String, RopeboundPlayer>?>(null) }
     Column(modifier = modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val teamsReady = state.teamA.players.isNotEmpty() && state.teamB.players.isNotEmpty()
+        val teamsReady = state.teamA.count >= 2 && state.teamB.count >= 2
         val everyoneReady = teamsReady && state.teamA.players.all { it.ready } && state.teamB.players.all { it.ready }
-        Text("Play 1v1 or add up to 4 runners per team. Stay together so the rope does not pull you back.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val currentTeamCount = when (state.viewerTeam) {
+            "A" -> state.teamA.count
+            "B" -> state.teamB.count
+            else -> 0
+        }
+        val switchingAllowed = state.isHost || state.freeTeamSwitching
+        Text("At least two runners are needed on each team. Swap players to keep both teams balanced.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
-            TeamCard("TEAM A", "A", state.teamA, state.viewerTeam == "A", busy, onChooseTeam, Modifier.weight(1f))
-            TeamCard("TEAM B", "B", state.teamB, state.viewerTeam == "B", busy, onChooseTeam, Modifier.weight(1f))
+            TeamCard(
+                title = "TEAM A",
+                teamId = "A",
+                team = state.teamA,
+                selected = state.viewerTeam == "A",
+                busy = busy,
+                viewerIdentity = viewerIdentity,
+                viewerTeam = state.viewerTeam,
+                isHost = state.isHost,
+                freeTeamSwitching = state.freeTeamSwitching,
+                canJoin = !busy && state.viewerTeam == "B" && currentTeamCount > 2 &&
+                    state.teamA.count < 5 && switchingAllowed,
+                onChooseTeam = onChooseTeam,
+                onRequestSwap = { player -> swapSelection = "A" to player },
+                modifier = Modifier.weight(1f),
+            )
+            TeamCard(
+                title = "TEAM B",
+                teamId = "B",
+                team = state.teamB,
+                selected = state.viewerTeam == "B",
+                busy = busy,
+                viewerIdentity = viewerIdentity,
+                viewerTeam = state.viewerTeam,
+                isHost = state.isHost,
+                freeTeamSwitching = state.freeTeamSwitching,
+                canJoin = !busy && state.viewerTeam == "A" && currentTeamCount > 2 &&
+                    state.teamB.count < 5 && switchingAllowed,
+                onChooseTeam = onChooseTeam,
+                onRequestSwap = { player -> swapSelection = "B" to player },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (state.isHost) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Allow free team switching", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Players can swap with someone on the other team.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = state.freeTeamSwitching,
+                    onCheckedChange = onSetFreeTeamSwitching,
+                    enabled = !busy,
+                )
+            }
+        } else if (state.freeTeamSwitching) {
+            Text("Free team switching is on. Tap Swap beside your name to switch.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(state.notice, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
@@ -493,13 +559,44 @@ private fun LobbyContent(
                 Text(
                     when {
                         !state.isHost -> "Host starts"
-                        !teamsReady -> "Need both teams"
+                        !teamsReady -> "Need 2 per team"
                         !everyoneReady -> "Waiting for ready"
                         else -> "Start race"
                     },
                 )
             }
         }
+    }
+
+    swapSelection?.let { (sourceTeam, sourcePlayer) ->
+        val targetTeamId = if (sourceTeam == "A") "B" else "A"
+        val targetTeam = if (targetTeamId == "A") state.teamA else state.teamB
+        AlertDialog(
+            onDismissRequest = { swapSelection = null },
+            title = { Text("Swap teams") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Choose a player from Team $targetTeamId. Both teams will keep the same number of players.")
+                    targetTeam.players.filter { it.id != sourcePlayer.id }.forEach { player ->
+                        TextButton(
+                            onClick = {
+                                onSwapPlayers(sourcePlayer.id, player.id)
+                                swapSelection = null
+                            },
+                            enabled = !busy,
+                        ) {
+                            Text("${sourcePlayer.name}  ↔  ${player.name}")
+                        }
+                    }
+                    if (targetTeam.players.none { it.id != sourcePlayer.id }) {
+                        Text("No connected player is available on the other team.")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { swapSelection = null }) { Text("Close") }
+            },
+        )
     }
 }
 
@@ -510,7 +607,13 @@ private fun TeamCard(
     team: RopeboundTeam,
     selected: Boolean,
     busy: Boolean,
+    viewerIdentity: String,
+    viewerTeam: String?,
+    isHost: Boolean,
+    freeTeamSwitching: Boolean,
+    canJoin: Boolean,
     onChooseTeam: (String) -> Unit,
+    onRequestSwap: (RopeboundPlayer) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -533,6 +636,18 @@ private fun TeamCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     PingBadge(player.pingMs)
+                    if (isHost || (freeTeamSwitching && viewerTeam == teamId && player.id == viewerIdentity)) {
+                        Text(
+                            "Swap",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable(enabled = !busy) { onRequestSwap(player) }
+                                .padding(horizontal = 4.dp, vertical = 3.dp),
+                        )
+                    }
                 }
             }
             team.spectators.forEach { spectator ->
@@ -547,14 +662,16 @@ private fun TeamCard(
             Spacer(Modifier.weight(1f))
             OutlinedButton(
                 onClick = { onChooseTeam(teamId) },
-                enabled = !busy && !selected && team.count < 5,
+                enabled = canJoin && !selected && team.count < 5,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     when {
                         selected -> "Your team"
                         team.count >= 5 -> "Full"
-                        else -> "Join team"
+                        canJoin -> "Join team"
+                        !isHost && !freeTeamSwitching -> "Ask host"
+                        else -> "Need 3 on your team"
                     },
                 )
             }

@@ -70,6 +70,7 @@ internal data class RopeboundSnapshot(
     val viewerTeam: String?,
     val viewerSpectating: Boolean,
     val isHost: Boolean,
+    val freeTeamSwitching: Boolean,
     val checkpointA: Float,
     val checkpointB: Float,
     val winner: String?,
@@ -141,6 +142,21 @@ internal class RopeboundApi(
 
     suspend fun chooseTeam(roomCode: String, participantToken: String, team: String): RopeboundSnapshot =
         post("/games/team", roomCode, participantToken, JSONObject().put("team", team))
+
+    suspend fun setFreeTeamSwitching(roomCode: String, participantToken: String, enabled: Boolean): RopeboundSnapshot =
+        post("/games/team-switching", roomCode, participantToken, JSONObject().put("enabled", enabled))
+
+    suspend fun swapPlayers(
+        roomCode: String,
+        participantToken: String,
+        playerId: String,
+        otherPlayerId: String,
+    ): RopeboundSnapshot = post(
+        "/games/swap-team",
+        roomCode,
+        participantToken,
+        JSONObject().put("playerId", playerId).put("otherPlayerId", otherPlayerId),
+    )
 
     suspend fun setReady(roomCode: String, participantToken: String, ready: Boolean): RopeboundSnapshot =
         post("/games/ready", roomCode, participantToken, JSONObject().put("ready", ready))
@@ -265,6 +281,7 @@ internal class RopeboundApi(
             viewerTeam = json.optString("viewerTeam").takeIf { it == "A" || it == "B" },
             viewerSpectating = json.optBoolean("viewerSpectating"),
             isHost = json.optBoolean("isHost"),
+            freeTeamSwitching = json.optBoolean("freeTeamSwitching"),
             checkpointA = checkpoints.optDouble("A", 8.0).toFloat(),
             checkpointB = checkpoints.optDouble("B", 8.0).toFloat(),
             winner = json.optString("winner").takeIf { it == "A" || it == "B" || it == "tie" },

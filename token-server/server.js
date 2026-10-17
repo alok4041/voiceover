@@ -56,6 +56,53 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(fileURLToPath(new URL('./public/', import.meta.url))));
 
+app.get('/.well-known/assetlinks.json', (_request, response) => {
+  response.json([{
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: {
+      namespace: 'android_app',
+      package_name: 'com.squadvoice.app',
+      sha256_cert_fingerprints: [
+        'DF:05:1B:66:68:4B:B0:68:C8:9F:C1:9A:25:21:15:9C:9E:7C:32:72:42:C6:24:6E:3D:E3:C5:65:77:05:50:39',
+      ],
+    },
+  }]);
+});
+
+app.get('/join', (request, response) => {
+  const code = readText(request.query?.code, 6).toUpperCase();
+  if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code)) {
+    return response.status(400).type('html').send(
+      '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>SquadVoice invite</title><main><h1>Invalid room invite</h1><p>Ask your friend for a fresh invite link or six-character code.</p></main>',
+    );
+  }
+
+  const appUri = `squadvoice://join?code=${encodeURIComponent(code)}`;
+  return response.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a1012">
+<title>Join SquadVoice room ${code}</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#0a1012;color:#edf7f5}
+body{min-height:100vh;margin:0;display:grid;place-items:center}
+main{box-sizing:border-box;width:min(100% - 32px,520px);padding:32px;border:1px solid #27413c;border-radius:24px;background:#10201e}
+h1{margin:0 0 10px;font-size:28px}p{color:#b6c9c4;line-height:1.55}
+code{display:block;margin:18px 0;padding:16px;border-radius:14px;background:#081412;color:#66e0cb;font-size:28px;font-weight:800;letter-spacing:.16em;text-align:center}
+a{display:block;margin-top:12px;padding:15px;border-radius:14px;background:#66e0cb;color:#082521;text-align:center;text-decoration:none;font-weight:800}
+a.secondary{background:#1b302c;color:#edf7f5}
+</style>
+</head>
+<body>
+<main><h1>Join your SquadVoice room</h1><p>Open the invite in SquadVoice to join the voice chat.</p><code>${code}</code>
+<a href="${appUri}">Open in SquadVoice</a>
+<a class="secondary" href="https://alok4041.github.io/voiceover/">Get SquadVoice or open this invite again</a>
+<p>If the app does not open, install it from the website and tap the invite link again.</p></main>
+</body></html>`);
+});
+
 app.get('/health', (_request, response) => response.json({ ok: true }));
 
 // Mount the game feature independently. Its simulation is separate from the
