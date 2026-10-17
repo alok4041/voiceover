@@ -633,9 +633,13 @@ export class RopeboundGameCore {
         const horizontalLimit = Math.sqrt(Math.max(0, MAX_ROPE_GAP ** 2 - verticalGap ** 2));
         const gap = leader.x - runner.x;
         if (gap < 0) {
-          const overlap = -gap;
-          leader.x -= overlap * 0.5;
-          runner.x += overlap * 0.5;
+          // Runners can briefly pass one another while jumping. Resolve the
+          // overlap around their midpoint; moving them farther apart here can
+          // fling the rope chain to opposite ends of the course.
+          const midpoint = (leader.x + runner.x) * 0.5;
+          const minimumGap = Math.min(0.8, horizontalLimit);
+          leader.x = midpoint + minimumGap * 0.5;
+          runner.x = midpoint - minimumGap * 0.5;
           const sharedVelocity = (leader.vx + runner.vx) * 0.5;
           leader.vx = sharedVelocity;
           runner.vx = sharedVelocity;
