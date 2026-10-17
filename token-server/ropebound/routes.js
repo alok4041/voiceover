@@ -13,6 +13,12 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
     return response.json({ ok: true });
   });
 
+  app.post('/games/heartbeat', (request, response) => {
+    const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
+    const participant = requireRoomParticipant(request, roomCode);
+    return response.json(ropebound.heartbeat(roomCode, participant.identity, request.body?.pingMs));
+  });
+
   app.get('/games/state', (request, response) => {
     const roomCode = readText(request.query?.roomCode, 32).toUpperCase();
     const participant = requireRoomParticipant(request, roomCode);
@@ -84,7 +90,7 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant) {
   }, 50);
   gameTick.unref();
 
-  const gamePresenceCleanup = setInterval(() => ropebound.cleanupStalePlayers(), 10_000);
+  const gamePresenceCleanup = setInterval(() => ropebound.cleanupStalePlayers(), 2_000);
   gamePresenceCleanup.unref();
 }
 

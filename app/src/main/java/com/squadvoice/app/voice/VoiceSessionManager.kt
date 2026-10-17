@@ -356,7 +356,15 @@ object VoiceSessionManager {
                 participant.toUi(activeSpeakerIds)?.let(::add)
             }
         }
-        mutableState.update { it.copy(participants = currentParticipants) }
+        // Keep the room-level mic control and local participant badge on the
+        // same source of truth. Reconnect and track events can arrive in either
+        // order, so updating only the participant list can leave stale UI state.
+        mutableState.update {
+            it.copy(
+                micEnabled = local.isMicrophoneEnabled,
+                participants = currentParticipants,
+            )
+        }
     }
 
     private fun Participant.toUi(speakers: Set<String>): ParticipantUi? {

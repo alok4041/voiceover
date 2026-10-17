@@ -70,6 +70,8 @@ internal fun VoiceRoomScreen(
     onLeave: () -> Unit,
 ) {
     var expandedVolumeIdentity by remember(room.code) { mutableStateOf<String?>(null) }
+    val roomPlayerCount = session.participants.map { it.identity }.distinct().size
+    val canPlayRopebound = session.isConnected && roomPlayerCount >= MIN_ROPEBOUND_PLAYERS
 
     Column(
         modifier = Modifier
@@ -78,7 +80,10 @@ internal fun VoiceRoomScreen(
             .padding(horizontal = 22.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column {
                 Text("VOICE ROOM", fontSize = 10.sp, color = Mint, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
                 Text(room.roomName, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -99,28 +104,49 @@ internal fun VoiceRoomScreen(
             onClick = onPlayRopebound,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(15.dp),
+            enabled = canPlayRopebound,
         ) {
-            Text("Play Ropebound · 2D")
+            Text(
+                if (canPlayRopebound) "Play Ropebound · 2D"
+                else "Waiting for players · ${roomPlayerCount.coerceAtMost(10)}/$MIN_ROPEBOUND_PLAYERS",
+            )
         }
+        Text(
+            if (canPlayRopebound) "Four players are in the room. Ropebound is ready."
+            else "Ropebound unlocks when four players are connected · ${roomPlayerCount.coerceAtMost(10)}/$MIN_ROPEBOUND_PLAYERS",
+            modifier = Modifier.padding(horizontal = 4.dp),
+            fontSize = 11.sp,
+            color = MutedText,
+        )
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(22.dp))
                 .background(Panel)
-                .padding(18.dp),
+                .padding(horizontal = 14.dp, vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text("ROOM CODE", fontSize = 10.sp, color = MutedText, letterSpacing = 1.4.sp)
                 Spacer(Modifier.height(4.dp))
-                Text(room.code, fontSize = 27.sp, color = Mint, fontWeight = FontWeight.ExtraBold, letterSpacing = 3.sp)
+                Text(
+                    room.code,
+                    fontSize = 24.sp,
+                    color = Mint,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 2.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                )
             }
-            Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                TextButtonLabel("Copy", onCopyCode)
-                Spacer(Modifier.height(8.dp))
-                TextButtonLabel("Share", onShareCode)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButtonLabel("Copy", onCopyCode, horizontalPadding = 8.dp)
+                TextButtonLabel("Share", onShareCode, horizontalPadding = 8.dp)
             }
         }
 
@@ -235,6 +261,8 @@ internal fun VoiceRoomScreen(
     }
 }
 
+private const val MIN_ROPEBOUND_PLAYERS = 4
+
 @Composable
 private fun MicControl(
     micEnabled: Boolean,
@@ -250,7 +278,7 @@ private fun MicControl(
         modifier = Modifier
             .widthIn(max = 280.dp)
             .fillMaxWidth()
-            .height(118.dp)
+            .height(88.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(color)
             .semantics {
@@ -292,7 +320,7 @@ private fun MicControl(
                     else -> "TAP TO UNMUTE"
                 },
                 color = textColor,
-                fontSize = 20.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = 1.sp,
             )
@@ -420,6 +448,7 @@ private fun TextButtonLabel(
     label: String,
     onClick: () -> Unit,
     accessibilityLabel: String = label,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 12.dp,
 ) {
     Text(
         label,
@@ -429,7 +458,7 @@ private fun TextButtonLabel(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
             .background(RaisedPanel)
-            .padding(horizontal = 12.dp, vertical = 7.dp)
+            .padding(horizontal = horizontalPadding, vertical = 7.dp)
             .clickable(onClick = onClick)
             .semantics { contentDescription = accessibilityLabel },
     )

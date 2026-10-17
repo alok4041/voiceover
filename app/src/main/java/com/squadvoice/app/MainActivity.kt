@@ -383,17 +383,16 @@ private fun SquadVoiceApp(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showRopeboundGame by rememberSaveable { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<LatestApkRelease?>(null) }
+    var isDownloadingUpdate by remember { mutableStateOf(false) }
+    var updateDownloadProgress by remember { mutableStateOf<Int?>(null) }
+    var updateDownloadMessage by remember { mutableStateOf<String?>(null) }
 
-    DisposableEffect(context, showRopeboundGame) {
-        val activity = context as? Activity
-        val previousOrientation = activity?.requestedOrientation
-        if (showRopeboundGame && activity != null) {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        }
-        onDispose {
-            if (showRopeboundGame && activity != null && previousOrientation != null) {
-                activity.requestedOrientation = previousOrientation
-            }
+    LaunchedEffect(context, showRopeboundGame) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        activity.requestedOrientation = if (showRopeboundGame) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 
@@ -403,6 +402,46 @@ private fun SquadVoiceApp(
         }.onSuccess { latest ->
             if (compareVersions(latest.version, BuildConfig.VERSION_NAME) > 0) {
                 availableUpdate = latest
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate(release: LatestApkRelease) {
+        if (isDownloadingUpdate) return
+
+        if (!AppUpdateChecker.canInstallPackages(context)) {
+            updateDownloadMessage = "Allow installs from SquadVoice once in Android settings, then return and tap the update button again."
+            runCatching { AppUpdateChecker.openInstallPermissionSettings(context) }
+                .onFailure { updateDownloadMessage = "Open Android Settings and allow installs from SquadVoice, then try again." }
+            return
+        }
+
+        val cachedApk = AppUpdateChecker.findDownloadedApk(context, release)
+        if (cachedApk != null) {
+            runCatching {
+                AppUpdateChecker.openApkInstaller(context, cachedApk)
+                updateDownloadMessage = "Android's installer opened. Confirm the update there to finish."
+            }.onFailure { error ->
+                updateDownloadMessage = error.message ?: "Couldn't open Android's installer."
+            }
+            return
+        }
+
+        isDownloadingUpdate = true
+        updateDownloadProgress = null
+        updateDownloadMessage = "Downloading SquadVoice v${release.version}…"
+        coroutineScope.launch {
+            try {
+                val apk = AppUpdateChecker.downloadApk(context, release) { progress ->
+                    updateDownloadProgress = progress
+                }
+                updateDownloadMessage = "Download complete. Confirm Install in Android's installer."
+                AppUpdateChecker.openApkInstaller(context, apk)
+            } catch (error: Exception) {
+                updateDownloadMessage = error.message ?: "Couldn't download the update. Check your connection and try again."
+            } finally {
+                isDownloadingUpdate = false
+                updateDownloadProgress = null
             }
         }
     }
@@ -602,6 +641,12 @@ private fun SquadVoiceApp(
                 noiseCancellationMessage = session.noiseCancellationMessage,
                 voiceRoomConnected = session.isConnected,
                 voiceRoomConnecting = session.isConnecting,
+                isDownloadingUpdate = isDownloadingUpdate,
+                updateDownloadProgress = updateDownloadProgress,
+                updateDownloadMessage = updateDownloadMessage,
+                onDownloadUpdate = { version, downloadUrl ->
+                    downloadAndInstallUpdate(LatestApkRelease(version, downloadUrl))
+                },
                 onSetDarkMode = onSetDarkMode,
                 onSelectAccentTheme = onSelectAccentTheme,
                 onSetMicNoiseMode = onSetMicNoiseMode,
@@ -689,8 +734,11 @@ private fun SquadVoiceApp(
                 errorMessage = errorMessage,
                 availableUpdate = availableUpdate,
                 onDownloadUpdate = {
-                    availableUpdate?.let { update -> openExternalLink(context, update.downloadUrl) }
+                    availableUpdate?.let(::downloadAndInstallUpdate)
                 },
+                isDownloadingUpdate = isDownloadingUpdate,
+                updateDownloadProgress = updateDownloadProgress,
+                updateDownloadMessage = updateDownloadMessage,
                 onOpenSettings = { showSettings = true },
                 onPlayerNameChange = {
                     playerName = it
@@ -730,6 +778,9 @@ private fun HomeScreen(
     errorMessage: String?,
     availableUpdate: LatestApkRelease?,
     onDownloadUpdate: () -> Unit,
+    isDownloadingUpdate: Boolean,
+    updateDownloadProgress: Int?,
+    updateDownloadMessage: String?,
     onOpenSettings: () -> Unit,
     onPlayerNameChange: (String) -> Unit,
     onRoomNameChange: (String) -> Unit,
@@ -793,8 +844,30 @@ private fun HomeScreen(
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
                         fontSize = 13.sp,
                     )
-                    Button(onClick = onDownloadUpdate, modifier = Modifier.fillMaxWidth()) {
-                        Text("Download v${update.version}")
+                    Button(
+                        onClick = onDownloadUpdate,
+                        enabled = !isDownloadingUpdate,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (isDownloadingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                            )
+                            Spacer(Modifier.width(9.dp))
+                            Text("Downloading${updateDownloadProgress?.let { " $it%" }.orEmpty()}")
+                        } else {
+                            Text("Download & install v${update.version}")
+                        }
+                    }
+                    updateDownloadMessage?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                        )
                     }
                 }
             }
@@ -874,6 +947,10 @@ private fun SettingsScreen(
     noiseCancellationMessage: String?,
     voiceRoomConnected: Boolean,
     voiceRoomConnecting: Boolean,
+    isDownloadingUpdate: Boolean,
+    updateDownloadProgress: Int?,
+    updateDownloadMessage: String?,
+    onDownloadUpdate: (String, String) -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
     onSelectAccentTheme: (String) -> Unit,
     onSetMicNoiseMode: (MicNoiseMode) -> Unit,
@@ -1168,17 +1245,31 @@ private fun SettingsScreen(
             }
             availableApkUrl?.let { downloadUrl ->
                 Button(
+                    enabled = !isDownloadingUpdate,
                     onClick = {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)))
-                        }.onFailure {
-                            updateMessage = "Couldn't open a browser to download the update."
-                            availableApkUrl = null
-                        }
+                        onDownloadUpdate(availableVersion.orEmpty(), downloadUrl)
                     },
                 ) {
-                    Text("Download v${availableVersion.orEmpty()} APK")
+                    if (isDownloadingUpdate) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text("Downloading${updateDownloadProgress?.let { " $it%" }.orEmpty()}")
+                    } else {
+                        Text("Download & install v${availableVersion.orEmpty()}")
+                    }
                 }
+            }
+            updateDownloadMessage?.let { message ->
+                Text(
+                    message,
+                    color = if (isDownloadingUpdate) MaterialTheme.colorScheme.primary else MutedText,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
             }
         }
 
