@@ -102,9 +102,10 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, ser
     response.on('close', () => clearInterval(interval));
   });
 
+  // Advance physics at 50Hz (20ms) for crisp server responsiveness.
   const gameTick = setInterval(() => {
-    for (const roomCode of ropebound.roomCodes()) ropebound.tick(roomCode, 0.033);
-  }, 33);
+    for (const roomCode of ropebound.roomCodes()) ropebound.tick(roomCode, 0.020);
+  }, 20);
   gameTick.unref();
 
   const gamePresenceCleanup = setInterval(() => ropebound.cleanupStalePlayers(), 2_000);
@@ -112,7 +113,8 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, ser
 }
 
 function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
-  const webSockets = new WebSocketServer({ noServer: true, maxPayload: 4_096 });
+  // Disable perMessageDeflate so small real-time JSON packets are never delayed by zlib buffering.
+  const webSockets = new WebSocketServer({ noServer: true, maxPayload: 4_096, perMessageDeflate: false });
 
   server.on('upgrade', (request, socket, head) => {
     const requestUrl = new URL(request.url || '/', 'http://localhost');
@@ -135,12 +137,17 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
       return;
     }
 
+    // Disable Nagle's algorithm (TCP_NODELAY) so small real-time WebSocket frames
+    // (inputs, pings, and 40Hz snapshots) are sent immediately without 20-40ms TCP buffering.
+    socket.setNoDelay?.(true);
+
     webSockets.handleUpgrade(request, socket, head, (client) => {
       webSockets.emit('connection', client, request, { roomCode, participant });
     });
   });
 
   webSockets.on('connection', (client, _request, { roomCode, participant }) => {
+    client._socket?.setNoDelay?.(true);
     try {
       ropebound.heartbeat(roomCode, participant.identity);
     } catch {
@@ -161,7 +168,7 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
     };
 
     sendState();
-    const stateInterval = setInterval(sendState, 33);
+    const stateInterval = setInterval(sendState, 25);
 
     client.on('message', (raw) => {
       let message;
@@ -179,6 +186,9 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
           client.send(JSON.stringify({ type: 'pong', clientSentAt: message.clientSentAt }));
         } else if (message.type === 'input') {
           ropebound.input(roomCode, participant.identity, message);
+          if (message.jump === true) {
+            sendState();
+          }
         }
       } catch (error) {
         client.send(JSON.stringify({

@@ -5,6 +5,8 @@ import android.graphics.Paint as AndroidPaint
 import android.graphics.Typeface
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.background
@@ -142,6 +144,9 @@ internal fun RopeboundGameScreen(
     var jumpPosition by remember {
         mutableStateOf(Offset(hudPreferences.getFloat("jump_x", .78f), hudPreferences.getFloat("jump_y", .78f)))
     }
+    var bracePosition by remember {
+        mutableStateOf(Offset(hudPreferences.getFloat("brace_x", .89f), hudPreferences.getFloat("brace_y", .78f)))
+    }
     var hasInitializedGameEffect by remember(roomCode) { mutableStateOf(false) }
     var observedGameEffectId by remember(roomCode) { mutableStateOf<Long?>(null) }
     var hasInitializedNotice by remember(roomCode) { mutableStateOf(false) }
@@ -167,13 +172,15 @@ internal fun RopeboundGameScreen(
         onDispose { gameAudio.release() }
     }
 
-    LaunchedEffect(hudOpacity, joystickPosition, jumpPosition) {
+    LaunchedEffect(hudOpacity, joystickPosition, jumpPosition, bracePosition) {
         hudPreferences.edit()
             .putFloat("opacity", hudOpacity)
             .putFloat("stick_x", joystickPosition.x)
             .putFloat("stick_y", joystickPosition.y)
             .putFloat("jump_x", jumpPosition.x)
             .putFloat("jump_y", jumpPosition.y)
+            .putFloat("brace_x", bracePosition.x)
+            .putFloat("brace_y", bracePosition.y)
             .apply()
     }
 
@@ -240,6 +247,8 @@ internal fun RopeboundGameScreen(
         }
     }
 
+    var localJumpStartedAt by remember(roomCode, participantToken) { mutableLongStateOf(0L) }
+
     LaunchedEffect(roomCode, participantToken, reconnectAttempt) {
         if (previewMode) return@LaunchedEffect
         while (true) {
@@ -249,7 +258,55 @@ internal fun RopeboundGameScreen(
                 api.events(roomCode, participantToken).collect { event ->
                     when (event) {
                         is RopeboundRealtimeEvent.State -> {
-                            snapshot = event.snapshot
+                            val incoming = event.snapshot
+                            val currentLocal = snapshot
+                            // Reconcile incoming authoritative server snapshot with local 60 FPS Client-Side Prediction
+                            // so ~80-100ms network RTT never pulls the local player backward or cancels an active jump.
+                            snapshot = if (currentLocal != null && incoming.phase == "race" && !incoming.viewerSpectating) {
+                                val now = SystemClock.elapsedRealtime()
+                                val localJumpAge = if (localJumpStartedAt == 0L) Float.POSITIVE_INFINITY else (now - localJumpStartedAt) / 1_000f
+                                val inLocalJump = localJumpAge in 0f..1.25f
+                                val activeInput = controls.value
+                                val isMovingLocally = abs(activeInput.move) > 0.06f || abs(activeInput.steer) > 0.06f || inLocalJump
+                                fun reconcileTeam(serverTeam: RopeboundTeam, localTeam: RopeboundTeam): RopeboundTeam {
+                                    val predPlayer = localTeam.players.firstOrNull { it.id == identity } ?: return serverTeam
+                                    val reconciledPlayers = serverTeam.players.map { srvPlayer ->
+                                        if (srvPlayer.id != identity) srvPlayer else {
+                                            val progressDiff = srvPlayer.progress - predPlayer.progress
+                                            val latDiff = srvPlayer.lateralOffset - predPlayer.lateralOffset
+                                            // Hard snap only if server triggered a checkpoint respawn / rescue (> 4.5m jump)
+                                            val hardTeleport = abs(progressDiff) > 0.045f
+                                            val blendedProgress = when {
+                                                hardTeleport -> srvPlayer.progress
+                                                isMovingLocally -> (predPlayer.progress + progressDiff * 0.22f).coerceIn(0f, 1f)
+                                                else -> (predPlayer.progress + progressDiff * 0.45f).coerceIn(0f, 1f)
+                                            }
+                                            val blendedLat = if (hardTeleport) srvPlayer.lateralOffset else {
+                                                (predPlayer.lateralOffset + latDiff * 0.28f).coerceIn(-1.25f, 1.25f)
+                                            }
+                                            val localJumpH = if (inLocalJump && !hardTeleport) {
+                                                (16f * localJumpAge - 12.5f * localJumpAge * localJumpAge).coerceAtLeast(0f)
+                                            } else srvPlayer.height
+                                            srvPlayer.copy(
+                                                progress = blendedProgress,
+                                                lateralOffset = blendedLat,
+                                                height = maxOf(localJumpH, srvPlayer.height),
+                                                grounded = if (inLocalJump && !hardTeleport) false else srvPlayer.grounded,
+                                                jumping = if (inLocalJump && !hardTeleport) true else srvPlayer.jumping,
+                                                bracing = activeInput.bracing,
+                                            )
+                                        }
+                                    }
+                                    return serverTeam.copy(players = reconciledPlayers)
+                                }
+                                if (incoming.viewerTeam == "B") {
+                                    incoming.copy(teamB = reconcileTeam(incoming.teamB, currentLocal.teamB))
+                                } else {
+                                    incoming.copy(teamA = reconcileTeam(incoming.teamA, currentLocal.teamA))
+                                }
+                            } else {
+                                incoming
+                            }
                             error = null
                         }
                         is RopeboundRealtimeEvent.Ping -> {
@@ -323,9 +380,9 @@ internal fun RopeboundGameScreen(
         val ownPlayer = ownTeam.players.firstOrNull { it.id == identity } ?: return
         val now = SystemClock.elapsedRealtime()
         if (!ownPlayer.grounded || now < jumpRequestBlockedUntil) return
-        // Match the server's ~1.28s jump flight so stale grounded snapshots
-        // cannot turn repeated taps into phantom mid-air jumps.
+        // Start local jump prediction on Frame 0 (0ms delay) and block double-taps during the ~1.25s jump arc.
         jumpRequestBlockedUntil = now + 1_250L
+        localJumpStartedAt = now
         controls.update { it.copy(jumpSequence = it.jumpSequence + 1) }
         inputTrigger.trySend(Unit)
         gameAudio.play(RopeboundGameAudio.Cue.JUMP)
@@ -336,6 +393,75 @@ internal fun RopeboundGameScreen(
             controls.value = GameControlState()
             inputTrigger.trySend(Unit)
             gameAudio.stopFootsteps()
+        }
+    }
+
+    // 60 FPS Client-Side Prediction loop for Live Multiplayer: advances local player immediately on input
+    // so movement, steering, and jumping respond in 0ms regardless of server ping.
+    LaunchedEffect(roomCode, participantToken, previewMode, snapshot?.phase, snapshot?.viewerSpectating) {
+        if (previewMode || snapshot?.phase != "race" || snapshot?.viewerSpectating == true) return@LaunchedEffect
+        var prevAt = SystemClock.elapsedRealtime()
+        var predForwardVel = 0f
+        var predLateralVel = 0f
+        while (true) {
+            val now = SystemClock.elapsedRealtime()
+            val dt = ((now - prevAt) / 1_000f).coerceIn(0.005f, 0.04f)
+            prevAt = now
+            val input = controls.value
+            val jumpAge = if (localJumpStartedAt == 0L) Float.POSITIVE_INFINITY else (now - localJumpStartedAt) / 1_000f
+            val jumping = jumpAge in 0f..1.28f
+            val jumpH = if (jumping) (16f * jumpAge - 12.5f * jumpAge * jumpAge).coerceAtLeast(0f) else 0f
+
+            val currentSnap = snapshot
+            if (currentSnap != null && currentSnap.phase == "race") {
+                val team = if (currentSnap.viewerTeam == "B") currentSnap.teamB else currentSnap.teamA
+                val surgeMult = if (team.surgeActive && input.move > 0.9f) 1.2f else 1f
+                val accelScale = (if (input.bracing) 0.55f else 1f) * surgeMult
+                predForwardVel += input.move * 30f * accelScale * dt
+                if (abs(input.move) < 0.04f) predForwardVel *= (1f - 8f * dt).coerceAtLeast(0f)
+                val maxSpeed = 12f * (if (team.surgeActive) 1.2f else 1f)
+                predForwardVel = predForwardVel.coerceIn(-12f * 0.45f, maxSpeed)
+
+                predLateralVel += input.steer * 20f * dt
+                if (abs(input.steer) < 0.04f) predLateralVel *= (1f - 9f * dt).coerceAtLeast(0f)
+                predLateralVel = predLateralVel.coerceIn(-2.6f, 2.6f)
+
+                val pIndex = team.players.indexOfFirst { it.id == identity }
+                if (pIndex >= 0) {
+                    val p = team.players[pIndex]
+                    var nextMeters = (p.progress * 100f + predForwardVel * dt).coerceIn(0f, 100f)
+                    // Local rope constraint prediction so local player stays within rope limit of adjacent teammates
+                    val effectiveGap = if (jumping) 9.7f else 7.5f
+                    if (pIndex > 0) {
+                        val leaderMeters = team.players[pIndex - 1].progress * 100f
+                        nextMeters = nextMeters.coerceIn(leaderMeters - effectiveGap, leaderMeters - 0.4f)
+                    }
+                    if (pIndex < team.players.lastIndex) {
+                        val trailerMeters = team.players[pIndex + 1].progress * 100f
+                        nextMeters = nextMeters.coerceAtMost(trailerMeters + effectiveGap)
+                    }
+                    val boulder = currentSnap.obstacles.firstOrNull { it.id == "boulder" }
+                    if (boulder != null && nextMeters in boulder.start..boulder.end && jumpH < 2.4f && p.height < 2.4f) {
+                        nextMeters = boulder.start - 1.5f
+                        predForwardVel = 0f
+                    }
+                    val nextLat = (p.lateralOffset + predLateralVel * dt).coerceIn(-1.25f, 1.25f)
+                    val updatedPlayers = team.players.toMutableList()
+                    updatedPlayers[pIndex] = p.copy(
+                        progress = (nextMeters / 100f).coerceIn(0f, 1f),
+                        lateralOffset = nextLat,
+                        height = if (jumping) jumpH else p.height,
+                        velocity = kotlin.math.hypot(predForwardVel, predLateralVel),
+                        grounded = !jumping && p.grounded,
+                        jumping = jumping || p.jumping,
+                        bracing = input.bracing,
+                    )
+                    val updatedTeam = team.copy(players = updatedPlayers)
+                    snapshot = if (currentSnap.viewerTeam == "B") currentSnap.copy(teamB = updatedTeam)
+                    else currentSnap.copy(teamA = updatedTeam)
+                }
+            }
+            delay(16)
         }
     }
 
@@ -360,11 +486,16 @@ internal fun RopeboundGameScreen(
             if (abs(current.move) > .12f || abs(current.steer) > .12f) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
             val active = abs(current.move) > .04f || abs(current.steer) > .04f || current.bracing || jumpActive
             val needsSend = active || current.move != lastMove || current.steer != lastSteer || current.bracing != lastBrace || jumpActive != lastJump
+            // Urgent state transitions (Jump, Brace, Start/Stop/Reverse Move) bypass periodic throttling for 0ms dispatch!
+            val urgentEdge = jumpActive != lastJump ||
+                current.bracing != lastBrace ||
+                (lastMove != null && (abs(current.move) > 0.05f) != (abs(lastMove!!) > 0.05f)) ||
+                (lastMove != null && current.move * lastMove!! < 0f)
 
             if (needsSend) {
                 val sinceLastSend = now - lastSentAt
-                if (lastSentAt != 0L && sinceLastSend < 50L) {
-                    delay(50L - sinceLastSend)
+                if (!urgentEdge && lastSentAt != 0L && sinceLastSend < 25L) {
+                    delay(25L - sinceLastSend)
                     continue
                 }
                 try {
@@ -389,7 +520,7 @@ internal fun RopeboundGameScreen(
                     delay(250)
                 }
             }
-            val waitTimeout = if (active) 50L else 150L
+            val waitTimeout = if (active) 25L else 120L
             withTimeoutOrNull(waitTimeout) {
                 inputTrigger.receive()
             }
@@ -403,6 +534,9 @@ internal fun RopeboundGameScreen(
         var previousFrameAt = SystemClock.elapsedRealtime()
         var forwardVelocity = 0f
         var lateralVelocity = 0f
+        val botJumpStartedAt = LongArray(4)
+        var bridgeEnteredAt = 0L
+        var lavaEnteredAt = 0L
         while (true) {
             val input = controls.value
             val now = SystemClock.elapsedRealtime()
@@ -423,27 +557,139 @@ internal fun RopeboundGameScreen(
             if (abs(input.steer) < .04f) lateralVelocity *= (1f - 9f * deltaSeconds).coerceAtLeast(0f)
             lateralVelocity = lateralVelocity.coerceIn(-2.6f, 2.6f)
             snapshot = snapshot?.let { current ->
+                var updatedCheckpoint = current.checkpointA
+                var updatedNotice = current.notice
                 fun advance(team: RopeboundTeam): RopeboundTeam {
-                    val updated = team.players.map { player ->
-                        if (player.id != identity) player else player.copy(
-                            progress = (player.progress + forwardVelocity * deltaSeconds / 100f).coerceIn(0f, .98f),
-                            lateralOffset = (player.lateralOffset + lateralVelocity * deltaSeconds).coerceIn(-1.25f, 1.25f),
-                            height = jumpHeight,
-                            velocity = kotlin.math.hypot(forwardVelocity, lateralVelocity),
-                            grounded = !jumping,
-                            jumping = jumping,
-                            bracing = input.bracing,
+                    val timeSec = now / 1_000f
+                    val localCurrent = team.players.firstOrNull { it.id == identity }
+                    var rawMeters = ((localCurrent?.progress ?: 0.448f) * 100f) + forwardVelocity * deltaSeconds
+                    // Authoritative-matching obstacle & gap physics in preview mode:
+                    val windObs = current.obstacles.firstOrNull { it.id == "wind-tunnel" }
+                    if (windObs != null && rawMeters in windObs.start..windObs.end && !input.bracing) {
+                        forwardVelocity = (forwardVelocity - 7f * deltaSeconds).coerceAtLeast(-5.4f)
+                        rawMeters = ((localCurrent?.progress ?: 0.448f) * 100f) + forwardVelocity * deltaSeconds
+                    }
+                    val boulderObs = current.obstacles.firstOrNull { it.id == "boulder" }
+                    if (boulderObs != null && rawMeters in boulderObs.start..boulderObs.end && jumpHeight < 2.4f) {
+                        rawMeters = boulderObs.start - 1.4f
+                        forwardVelocity = -1.5f
+                        updatedNotice = "Bumped the boulder! Tap Jump before reaching it."
+                        gameAudio.play(RopeboundGameAudio.Cue.BOULDER)
+                    }
+                    val pitObs = current.obstacles.firstOrNull { it.id == "pit" }
+                    val riverGapObs = current.obstacles.firstOrNull { it.id == "river-gap" }
+                    val lavaObs = current.obstacles.firstOrNull { it.id == "lava" }
+                    val bridgeObs = current.obstacles.firstOrNull { it.id == "river-bridge" }
+
+                    val fellInPit = pitObs != null && rawMeters in (pitObs.start + 0.4f)..(pitObs.end - 0.3f) && !jumping
+                    val fellInRiver = riverGapObs != null && rawMeters in (riverGapObs.start + 0.4f)..(riverGapObs.end - 0.3f) && !jumping
+                    if (bridgeObs != null && rawMeters in bridgeObs.start..bridgeObs.end && abs(forwardVelocity) < 0.8f) {
+                        if (bridgeEnteredAt == 0L) bridgeEnteredAt = now
+                    } else {
+                        bridgeEnteredAt = 0L
+                    }
+                    val bridgeBroke = bridgeEnteredAt != 0L && (now - bridgeEnteredAt) >= 850L
+
+                    if (lavaObs != null && rawMeters in (lavaObs.start + 0.3f)..(lavaObs.end - 0.3f) && !jumping) {
+                        if (lavaEnteredAt == 0L) lavaEnteredAt = now
+                    } else {
+                        lavaEnteredAt = 0L
+                    }
+                    val burnedInLava = lavaEnteredAt != 0L && (now - lavaEnteredAt) >= 380L
+
+                    if (fellInPit || fellInRiver || bridgeBroke || burnedInLava) {
+                        val respawnMeters = updatedCheckpoint.coerceIn(8f, 80f)
+                        forwardVelocity = 0f
+                        lateralVelocity = 0f
+                        bridgeEnteredAt = 0L
+                        lavaEnteredAt = 0L
+                        when {
+                            fellInRiver -> gameAudio.play(RopeboundGameAudio.Cue.WATER)
+                            bridgeBroke -> gameAudio.play(RopeboundGameAudio.Cue.BRIDGE_BREAK)
+                            burnedInLava -> gameAudio.play(RopeboundGameAudio.Cue.LAVA)
+                            else -> gameAudio.play(RopeboundGameAudio.Cue.CHECKPOINT)
+                        }
+                        updatedNotice = "Hazard recovery · regrouped at checkpoint ${respawnMeters.toInt()}m"
+                        val resetPlayers = team.players.mapIndexed { idx, p ->
+                            p.copy(
+                                progress = ((respawnMeters - idx * 1.1f) / 100f).coerceIn(0.02f, 0.98f),
+                                lateralOffset = 0f,
+                                height = 0f,
+                                velocity = 0f,
+                                grounded = true,
+                                jumping = false,
+                            )
+                        }
+                        return team.copy(
+                            players = resetPlayers,
+                            progress = resetPlayers.map { it.progress }.average().toFloat(),
+                            ropeTension = 0.18f,
                         )
                     }
+
+                    var leadProgress = (rawMeters / 100f).coerceIn(0.02f, .99f)
+                    val updated = team.players.mapIndexed { idx, player ->
+                        if (player.id == identity) {
+                            player.copy(
+                                progress = leadProgress,
+                                lateralOffset = (player.lateralOffset + lateralVelocity * deltaSeconds).coerceIn(-1.25f, 1.25f),
+                                height = jumpHeight,
+                                velocity = kotlin.math.hypot(forwardVelocity, lateralVelocity),
+                                grounded = !jumping,
+                                jumping = jumping,
+                                bracing = input.bracing,
+                            )
+                        } else {
+                            // Companion 3D squadmates follow the rope chain, weave naturally, and leap hazards
+                            val targetP = (leadProgress - idx * 0.011f).coerceIn(0.01f, 0.98f)
+                            val diffP = targetP - player.progress
+                            val botVel = (diffP * 100f / deltaSeconds.coerceAtLeast(0.016f)).coerceIn(-5.2f, 11.8f)
+                            val nextP = (player.progress + diffP * 0.24f).coerceIn(0.01f, 0.98f)
+                            val distanceMeters = nextP * 100f
+                            val nearJumpHazard = current.obstacles.any { obs ->
+                                obs.action == "jump" && distanceMeters in (obs.start - 1.2f)..(obs.end - 0.4f)
+                            }
+                            val botJumpAge = if (botJumpStartedAt[idx % 4] == 0L) Float.POSITIVE_INFINITY else (now - botJumpStartedAt[idx % 4]) / 1_000f
+                            if (nearJumpHazard && botJumpAge > 1.35f && abs(botVel) > 0.4f) {
+                                botJumpStartedAt[idx % 4] = now
+                            }
+                            val activeBotJumpAge = if (botJumpStartedAt[idx % 4] == 0L) Float.POSITIVE_INFINITY else (now - botJumpStartedAt[idx % 4]) / 1_000f
+                            val botJumping = activeBotJumpAge in 0f..1.28f
+                            val botHeight = if (botJumping) (16f * activeBotJumpAge - 12.5f * activeBotJumpAge * activeBotJumpAge).coerceAtLeast(0f) else 0f
+                            val targetLat = (sin(timeSec * 1.6f + idx * 1.3f) * 0.28f).coerceIn(-1.1f, 1.1f)
+                            val nextLat = player.lateralOffset + (targetLat - player.lateralOffset) * 0.14f
+                            player.copy(
+                                progress = nextP,
+                                lateralOffset = nextLat,
+                                height = botHeight,
+                                velocity = abs(botVel),
+                                grounded = !botJumping,
+                                jumping = botJumping,
+                                bracing = input.bracing,
+                            )
+                        }
+                    }
+                    val slowestMeters = (updated.minOfOrNull { it.progress } ?: 0f) * 100f
+                    val nextCp = listOf(8f, 19f, 30f, 40f, 50f, 64f, 80f).lastOrNull { slowestMeters >= it } ?: 8f
+                    if (nextCp > updatedCheckpoint) {
+                        updatedCheckpoint = nextCp
+                        updatedNotice = "Checkpoint ${nextCp.toInt()}m reached!"
+                    }
+                    val maxGap = updated.zipWithNext().maxOfOrNull { (a, b) -> abs(a.progress - b.progress) * 100f } ?: 1.2f
+                    val tension = (maxGap / 7.5f).coerceIn(0.12f, 0.92f)
+                    val surgeReady = forwardVelocity > 6.5f && !input.bracing
+                    val nextSurgeCharge = if (surgeReady) (team.surgeCharge + deltaSeconds * 0.45f).coerceAtMost(1f) else (team.surgeCharge - deltaSeconds * 0.25f).coerceAtLeast(0.15f)
                     return team.copy(
                         players = updated,
                         progress = updated.map { it.progress }.average().toFloat(),
-                        ropeTension = if (input.bracing) (team.ropeTension - .002f).coerceAtLeast(.04f)
-                        else (team.ropeTension + .0004f).coerceAtMost(.82f),
+                        ropeTension = tension,
+                        surgeCharge = nextSurgeCharge,
+                        surgeActive = nextSurgeCharge >= 0.95f,
                     )
                 }
-                if (current.viewerTeam == "B") current.copy(teamB = advance(current.teamB))
-                else current.copy(teamA = advance(current.teamA))
+                val nextTeam = if (current.viewerTeam == "B") advance(current.teamB) else advance(current.teamA)
+                if (current.viewerTeam == "B") current.copy(teamB = nextTeam, checkpointB = updatedCheckpoint, notice = updatedNotice)
+                else current.copy(teamA = nextTeam, checkpointA = updatedCheckpoint, notice = updatedNotice)
             }
             if (abs(input.move) > .12f || abs(input.steer) > .12f) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
             delay(33)
@@ -468,6 +714,7 @@ internal fun RopeboundGameScreen(
         else -> null
     }
     val ownPlayer = ownTeam?.players?.firstOrNull { it.id == identity }
+    val currentControls = controls.value
 
     LaunchedEffect(snapshot?.phase, ownTeam?.ropeTension) {
         val isHigh = snapshot?.phase == "race" && (ownTeam?.ropeTension ?: 0f) >= .78f
@@ -493,13 +740,23 @@ internal fun RopeboundGameScreen(
                 onOpenGameSettings = ::openGameSettings,
                 onExit = ::exitGame,
                 viewerSpectating = state.viewerSpectating,
+                localMoveInput = currentControls.move,
+                localSteerInput = currentControls.steer,
                 onStick = ::setStick,
                 hudOpacity = hudOpacity,
                 hudEditMode = hudEditMode,
                 joystickPosition = joystickPosition,
                 jumpPosition = jumpPosition,
+                bracePosition = bracePosition,
                 onJoystickPositionChange = { joystickPosition = it },
                 onJumpPositionChange = { jumpPosition = it },
+                onBracePositionChange = { bracePosition = it },
+                onResetHudPositions = {
+                    hudOpacity = .88f
+                    joystickPosition = Offset(.025f, .67f)
+                    jumpPosition = Offset(.78f, .78f)
+                    bracePosition = Offset(.89f, .78f)
+                },
                 onExitHudEdit = { hudEditMode = false },
                 onJump = ::jump,
                 onBrace = ::setBrace,
@@ -629,6 +886,7 @@ internal fun RopeboundGameScreen(
                     hudOpacity = .88f
                     joystickPosition = Offset(.025f, .67f)
                     jumpPosition = Offset(.78f, .78f)
+                    bracePosition = Offset(.89f, .78f)
                 },
                 onReset = {
                     ambienceVolume = 0.08f
@@ -649,9 +907,10 @@ private fun localPreviewSnapshot(): RopeboundSnapshot {
             id = "preview${index + 1}",
             name = name,
             ready = true,
-            progress = .445f,
+            progress = .448f - index * .011f,
+            lateralOffset = listOf(-.18f, .16f, -.14f, .20f)[index],
             height = 0f,
-            velocity = 1f,
+            velocity = 1.4f,
             grounded = true,
             jumping = false,
             bracing = false,
@@ -661,8 +920,8 @@ private fun localPreviewSnapshot(): RopeboundSnapshot {
     }
     val ownTeam = RopeboundTeam(
         count = players.size,
-        progress = .46f,
-        ropeTension = .18f,
+        progress = .445f,
+        ropeTension = .24f,
         surgeCharge = .42f,
         surgeActive = false,
         surgeCount = 0,
@@ -682,14 +941,15 @@ private fun localPreviewSnapshot(): RopeboundSnapshot {
         viewerSpectating = false,
         isHost = true,
         freeTeamSwitching = false,
-        checkpointA = .40f,
-        checkpointB = .36f,
+        checkpointA = 40f,
+        checkpointB = 30f,
         winner = null,
-        notice = "Local visual preview · game controls are offline",
+        notice = "Local 3D preview · move with joystick & drag screen to orbit 360°",
         hazard = null,
         effect = null,
         obstacles = listOf(
             RopeboundObstacle("pit", "Spike pit", "jump", "Jump across the spike pit", 23f, 27.5f),
+            RopeboundObstacle("boulder", "Path boulder", "jump", "Jump over the stone boulder", 36f, 38.5f),
             RopeboundObstacle("river-bridge", "Rope bridge", "balance", "Cross the moving bridge", 43f, 49f),
             RopeboundObstacle("river-gap", "River gap", "jump", "Leap over the river gap", 56f, 61f),
             RopeboundObstacle("wind-tunnel", "Wind tunnel", "brace", "Brace against the gusts", 67f, 73.5f),
@@ -1202,6 +1462,8 @@ private fun RaceContent(
     microphoneEnabled: Boolean,
     onDismissError: () -> Unit,
     viewerSpectating: Boolean,
+    localMoveInput: Float = 0f,
+    localSteerInput: Float = 0f,
     onToggleMicrophone: () -> Unit,
     onOpenGameSettings: () -> Unit,
     onExit: () -> Unit,
@@ -1212,19 +1474,25 @@ private fun RaceContent(
     hudEditMode: Boolean,
     joystickPosition: Offset,
     jumpPosition: Offset,
+    bracePosition: Offset = Offset(.89f, .78f),
     onJoystickPositionChange: (Offset) -> Unit,
     onJumpPositionChange: (Offset) -> Unit,
+    onBracePositionChange: (Offset) -> Unit = {},
+    onResetHudPositions: () -> Unit = {},
     onExitHudEdit: () -> Unit,
     previewMode: Boolean,
 ) {
     val ownTeam = if (state.viewerTeam == "A") state.teamA else state.teamB
     val otherTeam = if (state.viewerTeam == "A") state.teamB else state.teamA
     val latestJumpPosition by rememberUpdatedState(jumpPosition)
+    val latestBracePosition by rememberUpdatedState(bracePosition)
     var playgroundReady by remember { mutableStateOf(false) }
     var minimumLoadingTimeComplete by remember { mutableStateOf(false) }
     var splashVisible by remember { mutableStateOf(true) }
     var gameUiVisible by remember { mutableStateOf(false) }
-    var topDownCamera by remember { mutableStateOf(false) }
+    var cameraMode by remember { mutableStateOf(0) } // 0 = Follow, 1 = 3D Hero Orbit, 2 = Top-Down
+    var orbitYawOffset by remember { mutableStateOf(0f) }
+    var orbitPitchOffset by remember { mutableStateOf(0f) }
     LaunchedEffect(Unit) {
         delay(1_900)
         minimumLoadingTimeComplete = true
@@ -1238,9 +1506,27 @@ private fun RaceContent(
         }
     }
     val cameraBlend by animateFloatAsState(
-        targetValue = if (!gameUiVisible) .48f else if (topDownCamera) 1f else 0f,
+        targetValue = if (!gameUiVisible) .48f else if (cameraMode == 2) 1f else 0f,
         animationSpec = tween(durationMillis = 700),
         label = "camera-view-transition",
+    )
+    val baseYawTarget = when (cameraMode) {
+        1 -> 0.68f
+        else -> 0f
+    }
+    val basePitchTarget = when (cameraMode) {
+        1 -> 0.14f
+        else -> 0.04f
+    }
+    val animatedBaseYaw by animateFloatAsState(
+        targetValue = baseYawTarget,
+        animationSpec = tween(durationMillis = 550),
+        label = "camera-yaw-transition",
+    )
+    val animatedBasePitch by animateFloatAsState(
+        targetValue = basePitchTarget,
+        animationSpec = tween(durationMillis = 550),
+        label = "camera-pitch-transition",
     )
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val loadingAnimation = rememberInfiniteTransition(label = "playground-loading")
@@ -1263,6 +1549,14 @@ private fun RaceContent(
             viewerIdentity = viewerIdentity,
             obstacles = state.obstacles,
             cameraBlend = cameraBlend,
+            cameraOrbitYaw = animatedBaseYaw + orbitYawOffset,
+            cameraOrbitPitch = (animatedBasePitch + orbitPitchOffset).coerceIn(-0.25f, 0.58f),
+            localMoveInput = localMoveInput,
+            localSteerInput = localSteerInput,
+            onCameraOrbitDrag = { dyaw, dpitch ->
+                orbitYawOffset = (orbitYawOffset + dyaw) % (2f * PI.toFloat())
+                orbitPitchOffset = (orbitPitchOffset + dpitch).coerceIn(-0.32f, 0.48f)
+            },
             showPlayerNameplates = gameUiVisible,
             modifier = Modifier.fillMaxSize(),
             onReady = { playgroundReady = true },
@@ -1290,11 +1584,20 @@ private fun RaceContent(
                 RaceMarker("TENSION", ownTeam.ropeTension, valueColor = Color(0xFFFFD34E), isTension = true)
             }
             Spacer(Modifier.weight(1f))
-            HudActionButton(GameHudIcon.Follow, null, selected = !topDownCamera, modifier = Modifier.size(38.dp), description = "Follow camera") {
-                topDownCamera = false
+            HudActionButton(GameHudIcon.Follow, null, selected = cameraMode == 0 && abs(orbitYawOffset) < 0.05f, modifier = Modifier.size(38.dp), description = "Follow camera") {
+                cameraMode = 0
+                orbitYawOffset = 0f
+                orbitPitchOffset = 0f
             }
-            HudActionButton(GameHudIcon.TopView, null, selected = topDownCamera, modifier = Modifier.size(38.dp), description = "Top camera") {
-                topDownCamera = true
+            HudActionButton(GameHudIcon.Orbit3D, "3D", selected = cameraMode == 1 || abs(orbitYawOffset) >= 0.05f, modifier = Modifier.height(38.dp), description = "3D Hero Orbit camera") {
+                cameraMode = if (cameraMode == 1) 0 else 1
+                orbitYawOffset = 0f
+                orbitPitchOffset = 0f
+            }
+            HudActionButton(GameHudIcon.TopView, null, selected = cameraMode == 2, modifier = Modifier.size(38.dp), description = "Top camera") {
+                cameraMode = 2
+                orbitYawOffset = 0f
+                orbitPitchOffset = 0f
             }
             HudActionButton(GameHudIcon.Settings, null, modifier = Modifier.size(38.dp), description = "Game settings", onClick = onOpenGameSettings)
             HudActionButton(
@@ -1315,7 +1618,7 @@ private fun RaceContent(
 
         if (previewMode && gameUiVisible) {
             Text(
-                "LOCAL PREVIEW · 4 DEMO RUNNERS",
+                "3D PREVIEW · MOVE STICK TO TURN/RUN · DRAG SCREEN TO ORBIT 360°",
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 53.dp)
                     .background(Color(0xB9102630), RoundedCornerShape(10.dp))
                     .padding(horizontal = 9.dp, vertical = 4.dp),
@@ -1418,18 +1721,58 @@ private fun RaceContent(
                     highlighted = true,
                 )
                 HoldBraceButton(
-                    onBrace,
-                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottomPadding).size(56.dp)
-                        .graphicsLayer { alpha = hudOpacity },
+                    onBrace = { if (!hudEditMode) onBrace(it) else onBrace(false) },
+                    modifier = Modifier.offset {
+                        val buttonPx = with(density) { 56.dp.toPx() }
+                        IntOffset(
+                            (screenWidthPx * bracePosition.x).roundToInt().coerceIn(0, (screenWidthPx - buttonPx).roundToInt().coerceAtLeast(0)),
+                            (screenHeightPx * bracePosition.y).roundToInt().coerceIn(0, (screenHeightPx - buttonPx).roundToInt().coerceAtLeast(0)),
+                        )
+                    }.size(56.dp)
+                        .graphicsLayer { alpha = hudOpacity }
+                        .pointerInput(hudEditMode, screenWidthPx, screenHeightPx) {
+                            if (hudEditMode) {
+                                var dragPosition = latestBracePosition
+                                detectDragGestures(onDragStart = { dragPosition = latestBracePosition }) { change, drag ->
+                                    change.consume()
+                                    val sizePx = with(density) { 56.dp.toPx() }
+                                    dragPosition = Offset(
+                                        (dragPosition.x + drag.x / screenWidthPx).coerceIn(0f, (screenWidthPx - sizePx) / screenWidthPx),
+                                        (dragPosition.y + drag.y / screenHeightPx).coerceIn(0f, (screenHeightPx - sizePx) / screenHeightPx),
+                                    )
+                                    onBracePositionChange(dragPosition)
+                                }
+                            }
+                        },
                 )
                 if (hudEditMode) {
                     Surface(
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp).clickable(onClick = onExitHudEdit),
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
                         shape = RoundedCornerShape(50),
-                        color = Color(0xE6102630),
-                        border = BorderStroke(1.dp, Color(0xFF66E0CB)),
+                        color = Color(0xEE102630),
+                        border = BorderStroke(1.2.dp, Color(0xFF66E0CB)),
                     ) {
-                        Text("HUD EDIT · drag controls · DONE", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("HUD EDIT · Drag Stick, Jump & Brace", color = Color(0xFF9BE9DE), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "RESET",
+                                modifier = Modifier.clickable(onClick = onResetHudPositions).padding(horizontal = 4.dp, vertical = 2.dp),
+                                color = Color(0xFFFFD166),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "DONE",
+                                modifier = Modifier.clickable(onClick = onExitHudEdit).padding(horizontal = 4.dp, vertical = 2.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                            )
+                        }
                     }
                 }
             }
@@ -1521,7 +1864,7 @@ private fun VirtualJoystick(
                     val rawX = (position.x - center) / travel
                     val rawY = (position.y - center) / travel
                     val rawMagnitude = kotlin.math.hypot(rawX, rawY)
-                    val deadZone = .14f
+                    val deadZone = .12f
                     val inputScale = if (rawMagnitude <= deadZone || rawMagnitude == 0f) {
                         0f
                     } else {
@@ -1546,21 +1889,27 @@ private fun VirtualJoystick(
                         onPositionChange(dragPosition)
                     }
                 } else {
-                    detectDragGestures(
-                        onDragStart = ::updateAxes,
-                        onDragEnd = {
-                            activeMove = 0f
-                            activeSteer = 0f
-                            onInput(0f, 0f)
-                        },
-                        onDragCancel = {
-                            activeMove = 0f
-                            activeSteer = 0f
-                            onInput(0f, 0f)
-                        },
-                    ) { change, _ ->
-                        change.consume()
-                        updateAxes(change.position)
+                    // Instant zero-slop touch handling so tapping and holding any of the 4 direction arrows
+                    // or sliding the thumbstick responds on the very first touch frame.
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        updateAxes(down.position)
+                        var pointerId = down.id
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == pointerId }
+                                ?: event.changes.firstOrNull { it.pressed }
+                            if (change == null || !change.pressed) {
+                                activeMove = 0f
+                                activeSteer = 0f
+                                onInput(0f, 0f)
+                                break
+                            }
+                            pointerId = change.id
+                            change.consume()
+                            updateAxes(change.position)
+                        }
                     }
                 }
             },
@@ -1576,7 +1925,12 @@ private fun VirtualJoystick(
             radius = radius,
             center = center,
         )
-        drawCircle(Color(0xFFE2F4F4).copy(alpha = .78f), radius, center, style = Stroke(2.dp.toPx()))
+        drawCircle(
+            if (editing) Color(0xFF48F0D8) else Color(0xFFE2F4F4).copy(alpha = .78f),
+            radius,
+            center,
+            style = Stroke(if (editing) 2.6.dp.toPx() else 2.dp.toPx()),
+        )
         drawCircle(Color(0xFF39D9D5).copy(alpha = .46f), radius * .72f, center, style = Stroke(1.dp.toPx()))
 
         fun arrow(dx: Float, dy: Float) {
@@ -1609,7 +1963,7 @@ private fun VirtualJoystick(
     }
 }
 
-private enum class GameHudIcon { Follow, TopView, Settings, Microphone, Voice }
+private enum class GameHudIcon { Follow, Orbit3D, TopView, Settings, Microphone, Voice }
 
 @Composable
 private fun HudActionButton(
@@ -1648,6 +2002,13 @@ private fun HudActionButton(
                         drawRoundRect(c, Offset(cx - 6.dp.toPx(), cy + 1.dp.toPx()), Size(12.dp.toPx(), 5.dp.toPx()), CornerRadius(3.dp.toPx()))
                         drawRoundRect(c, Offset(cx - 9.dp.toPx(), cy + 2.dp.toPx()), Size(5.dp.toPx(), 4.dp.toPx()), CornerRadius(2.dp.toPx()))
                         drawRoundRect(c, Offset(cx + 4.dp.toPx(), cy + 2.dp.toPx()), Size(5.dp.toPx(), 4.dp.toPx()), CornerRadius(2.dp.toPx()))
+                    }
+                    GameHudIcon.Orbit3D -> {
+                        // 3D Cube / Orbit icon
+                        val r = 6.dp.toPx()
+                        drawCircle(c, r, Offset(cx, cy), style = Stroke(stroke))
+                        drawArc(c, 0f, 360f, false, Offset(cx - r, cy - r * .45f), Size(r * 2f, r * .9f), style = Stroke(stroke * .85f))
+                        drawCircle(c, 1.8.dp.toPx(), Offset(cx, cy))
                     }
                     GameHudIcon.TopView -> {
                         drawRoundRect(c, Offset(cx - 8.dp.toPx(), cy - 5.dp.toPx()), Size(16.dp.toPx(), 11.dp.toPx()), CornerRadius(2.dp.toPx()), style = Stroke(stroke))

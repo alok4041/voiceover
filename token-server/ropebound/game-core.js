@@ -317,9 +317,8 @@ export class RopeboundGameCore {
     const move = Number(payload?.move);
     const steer = Number(payload?.steer ?? 0);
     const now = Date.now();
-    if (now - player.lastInputAt < 30) throw new GameError('Controls are arriving too quickly.', 'input_rate_limited');
     if (!Number.isSafeInteger(seq) || seq <= player.input.seq) {
-      throw new GameError('Input sequence must increase.', 'stale_input');
+      return false;
     }
     if (!Number.isFinite(move) || move < -1 || move > 1) {
       throw new GameError('Move must be between -1 and 1.', 'invalid_input');
@@ -329,13 +328,25 @@ export class RopeboundGameCore {
     }
     const inputMagnitude = Math.hypot(move, steer);
     const inputScale = inputMagnitude > 1 ? 1 / inputMagnitude : 1;
+    // Coalesce burst packets cleanly without throwing rate-limit errors when network jitter batches frames;
+    // preserve rising jump pulses across coalesced packets.
+    const preserveJumpPulse = (now - player.lastInputAt < 25) && player.input.jump && !player.wasJumpPressed;
+    const jumpRequested = payload?.jump === true || preserveJumpPulse;
     player.input = {
       seq,
       move: move * inputScale,
       steer: steer * inputScale,
-      jump: payload?.jump === true,
+      jump: jumpRequested,
       brace: payload?.brace === true,
     };
+    // Trigger jump takeoff immediately on packet arrival if grounded so the player
+    // never waits up to a full server tick before leaving the ground.
+    if (jumpRequested && player.grounded && !player.wasJumpPressed) {
+      player.vy = JUMP_IMPULSE;
+      player.grounded = false;
+      player.wasJumpPressed = true;
+      room.notice = `${player.name} jumped.`;
+    }
     player.lastInputAt = now;
     player.lastSeenAt = now;
     player.inputExpiresAt = now + INPUT_HOLD_MS;
@@ -705,18 +716,18 @@ export class RopeboundGameCore {
   #enforceRope(room, team) {
     const members = teamPlayers(room, team);
     // Revisit adjacent links because correcting one pair can stretch the next.
-    // A few constraint passes keep the whole chain inside its length limit.
+    // Give airborne jumpers extra slack so jumping across pits, rivers, and lava
+    // never yanks a jumper backward mid-flight.
     for (let pass = 0; pass < members.length; pass += 1) {
       for (let index = 1; index < members.length; index += 1) {
         const leader = members[index - 1];
         const runner = members[index];
-        const verticalGap = leader.y - runner.y;
-        const horizontalLimit = Math.sqrt(Math.max(0, MAX_ROPE_GAP ** 2 - verticalGap ** 2));
+        const airborne = !leader.grounded || !runner.grounded;
+        const effectiveMaxGap = MAX_ROPE_GAP + (airborne ? 2.2 : 0);
+        const verticalGap = (leader.y - runner.y) * 0.35;
+        const horizontalLimit = Math.sqrt(Math.max(4, effectiveMaxGap ** 2 - verticalGap ** 2));
         const gap = leader.x - runner.x;
         if (gap < 0) {
-          // Runners can briefly pass one another while jumping. Resolve the
-          // overlap around their midpoint; moving them farther apart here can
-          // fling the rope chain to opposite ends of the course.
           const midpoint = (leader.x + runner.x) * 0.5;
           const minimumGap = Math.min(0.8, horizontalLimit);
           leader.x = midpoint + minimumGap * 0.5;
@@ -726,10 +737,12 @@ export class RopeboundGameCore {
           runner.vx = sharedVelocity;
         } else if (gap > horizontalLimit) {
           const stretch = gap - horizontalLimit;
-          leader.x -= stretch * 0.75;
-          runner.x += stretch * 0.25;
+          const leaderPull = !leader.grounded && runner.grounded ? 0.45 : 0.72;
+          const runnerPull = 1 - leaderPull;
+          leader.x -= stretch * leaderPull;
+          runner.x += stretch * runnerPull;
           const sharedVelocity = (leader.vx + runner.vx) * 0.5;
-          leader.vx = Math.min(leader.vx, sharedVelocity);
+          leader.vx = Math.min(leader.vx, Math.max(sharedVelocity, leader.vx * 0.82));
           runner.vx = Math.max(runner.vx, sharedVelocity);
         }
       }
