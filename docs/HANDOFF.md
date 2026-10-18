@@ -8,8 +8,8 @@ This file is a working handoff for an agent continuing the app, token-server, we
 - Default branch observed locally: `main`
 - Latest published app source: `e34761d` (`release: prepare SquadVoice v1.2.5`). The v1.2.5 GitHub Release and APK are published. Local v1.2.6 control fixes are in progress; check `git status` before release.
 - Android download website: <https://alok4041.github.io/voiceover/>
-- Render token/game API URL: <https://squadvoice-api-alok1404-251015-0109.onrender.com>
-- Render health check: <https://squadvoice-api-alok1404-251015-0109.onrender.com/health>
+- Render token/game API URL: <https://voiceover-1.onrender.com>
+- Render health check: <https://voiceover-1.onrender.com/health>
 - Latest Android release: `1.2.5` / version code `17`, GitHub tag `v1.2.5`, asset `SquadVoice-v1.2.5.apk`. Current release work: `1.2.6` / version code `18`.
 
 SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio; a Node.js/Express server issues room codes and LiveKit tokens and also serves the Ropebound game API. The website is a separate GitHub Pages deployment. The Render service also serves `token-server/public/index.html` at `/`.
@@ -100,7 +100,7 @@ The v1.2.5 source is published on GitHub `main` and tag `v1.2.5`. The v1.2.6 cha
 `app/build.gradle.kts` reads Gradle property `TOKEN_SERVER_URL`, falling back to the same Render URL. The tracked root `gradle.properties` currently sets:
 
 ```properties
-TOKEN_SERVER_URL=https://squadvoice-api-alok1404-251015-0109.onrender.com
+TOKEN_SERVER_URL=https://voiceover-1.onrender.com
 ```
 
 That Render URL was provided by the user. A physical phone must use a reachable server URL; `10.0.2.2` is an Android-emulator alias for the host computer and will fail on a physical phone. The earlier phone screenshot showed a connection attempt to `10.0.2.2:3000`.
@@ -129,7 +129,7 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 
 ## Render deployment notes
 
-- The Render service URL is `https://squadvoice-api-alok1404-251015-0109.onrender.com`.
+- The Render service URL is `https://voiceover-1.onrender.com`.
 - The service runs from the `token-server/` subtree. A prior Render log showed the package path `/opt/render/project/src/token-server/package.json`, `npm install`, and Node `26.12.0`.
 - `token-server/package.json` uses `npm start` and requires Node `>=20.6`.
 - Configure Render's environment variables (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) in Render's Environment settings; do not copy their values into this document or commit them.
@@ -143,7 +143,7 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 - GitHub Pages site: <https://alok4041.github.io/voiceover/>.
 - This is the public place users visit to download/install the Android app. It is a website, not the Android app itself.
 - The Android app source is in this repository under `app/`. The installable file is an APK attached to a GitHub Release; the website links users to that release asset.
-- The backend is published separately as the Render web service at <https://squadvoice-api-alok1404-251015-0109.onrender.com>. Render is not where users download the APK.
+- The backend is published separately as the Render web service at <https://voiceover-1.onrender.com>. Render is not where users download the APK.
 - No Google Play listing or Play Store publishing setup was found in the checked repository. The observed distribution path is direct APK download from the site/GitHub Release.
 - Where code changes go: the GitHub repository `alok4041/voiceover`, normally its `main` branch. Confirm the repository's Pages settings before relying on a push to `main` to update the website.
 - Latest APK release: GitHub repository → **Releases** → tag `v1.2.5`, asset `SquadVoice-v1.2.5.apk`. Current work prepares `v1.2.6` / `SquadVoice-v1.2.6.apk`.
@@ -167,4 +167,4 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 
 ## Copy-paste prompt for the next agent
 
-> Continue the SquadVoice v1.2.6 update in `/Users/alok1404/voiceover`. Read `docs/release-notes-v1.2.6.md` and inspect `git status --short`. Published release v1.2.5 contains the 3D Ropebound scene and WebSocket game transport. Current changes fix held movement buttons, add camera-oriented movement arrows, and label the game as 3D. Voice remains on LiveKit. Render API: `https://squadvoice-api-alok1404-251015-0109.onrender.com`. Keep LiveKit secrets private.
+> Continue the SquadVoice v1.2.6 update in `/Users/alok1404/voiceover`. Read `docs/release-notes-v1.2.6.md` and inspect `git status --short`. Published release v1.2.5 contains the 3D Ropebound scene and WebSocket game transport. Current changes fix held movement buttons, add camera-oriented movement arrows, and label the game as 3D. Voice remains on LiveKit. Render API: `https://voiceover-1.onrender.com`. Keep LiveKit secrets private.

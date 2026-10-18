@@ -103,8 +103,8 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, ser
   });
 
   const gameTick = setInterval(() => {
-    for (const roomCode of ropebound.roomCodes()) ropebound.tick(roomCode, 0.05);
-  }, 50);
+    for (const roomCode of ropebound.roomCodes()) ropebound.tick(roomCode, 0.033);
+  }, 33);
   gameTick.unref();
 
   const gamePresenceCleanup = setInterval(() => ropebound.cleanupStalePlayers(), 2_000);
@@ -141,6 +141,16 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
   });
 
   webSockets.on('connection', (client, _request, { roomCode, participant }) => {
+    try {
+      ropebound.heartbeat(roomCode, participant.identity);
+    } catch {
+      try {
+        ropebound.join(roomCode, participant.identity, participant.name);
+      } catch {
+        // ignore join error if race already running or full
+      }
+    }
+
     const sendState = () => {
       if (client.readyState !== WebSocket.OPEN) return;
       try {
@@ -151,7 +161,7 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
     };
 
     sendState();
-    const stateInterval = setInterval(sendState, 100);
+    const stateInterval = setInterval(sendState, 33);
 
     client.on('message', (raw) => {
       let message;

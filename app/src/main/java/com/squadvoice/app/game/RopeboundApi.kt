@@ -38,6 +38,7 @@ internal data class RopeboundPlayer(
     val bracing: Boolean,
     val host: Boolean,
     val pingMs: Int?,
+    val online: Boolean = true,
 )
 
 internal data class RopeboundTeam(
@@ -366,6 +367,7 @@ internal class RopeboundApi(
                             pingMs = if (player.has("pingMs") && !player.isNull("pingMs")) {
                                 player.optInt("pingMs").coerceIn(0, 2_000)
                             } else null,
+                            online = player.optBoolean("online", true),
                         ),
                     )
                 }

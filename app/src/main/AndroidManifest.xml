@@ -26,7 +26,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="squadvoice-api-alok1404-251015-0109.onrender.com"
+                    android:host="voiceover-1.onrender.com"
                     android:path="/join" />
             </intent-filter>
             <intent-filter>

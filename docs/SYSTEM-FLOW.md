@@ -60,8 +60,8 @@ The repository source is the shared origin, but publishing is a separate action 
 ## Current project endpoints
 
 - Download page: <https://alok4041.github.io/voiceover/>
-- Render API and Render-hosted page: <https://squadvoice-api-alok1404-251015-0109.onrender.com>
-- Render health check: <https://squadvoice-api-alok1404-251015-0109.onrender.com/health>
+- Render API and Render-hosted page: <https://voiceover-1.onrender.com>
+- Render health check: <https://voiceover-1.onrender.com/health>
 - GitHub releases: <https://github.com/alok4041/voiceover/releases>
 
 On a physical phone, use the HTTPS Render endpoint (or a reachable LAN IP during local development). `10.0.2.2` is for an Android emulator, and `127.0.0.1` on the phone points back to the phone itself.

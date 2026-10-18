@@ -10,7 +10,9 @@ const GRAVITY = 25;
 const JUMP_IMPULSE = 16;
 const INPUT_HOLD_MS = 700;
 const PLAYER_OFFLINE_GRACE_MS = 8_000;
+const LOBBY_PLAYER_OFFLINE_GRACE_MS = 60_000;
 const PLAYER_RECORD_RETENTION_MS = 30_000;
+const LOBBY_RECORD_RETENTION_MS = 180_000;
 const TEAM_RESCUES_PER_RACE = 3;
 const SURGE_CHARGE_SECONDS = 1.2;
 const SURGE_DURATION_MS = 2_400;
@@ -492,6 +494,7 @@ export class RopeboundGameCore {
             id: player.id,
             name: player.name,
             ready: player.ready,
+            online: player.online,
             progress: Number((player.x / COURSE_LENGTH).toFixed(3)),
             height: Number(player.y.toFixed(2)),
             velocity: Number(player.vx.toFixed(2)),
@@ -548,10 +551,14 @@ export class RopeboundGameCore {
 
   cleanupStalePlayers(now = Date.now(), graceMs = PLAYER_OFFLINE_GRACE_MS) {
     for (const room of this.#rooms.values()) {
+      const effectiveGrace = room.phase === 'lobby' ? LOBBY_PLAYER_OFFLINE_GRACE_MS : graceMs;
+      const effectiveRetention = room.phase === 'lobby' ? LOBBY_RECORD_RETENTION_MS : PLAYER_RECORD_RETENTION_MS;
       for (const player of room.players.values()) {
-        if (player.online && now - player.lastSeenAt > graceMs) {
+        if (player.online && now - player.lastSeenAt > effectiveGrace) {
           player.online = false;
-          player.inRace = false;
+          if (room.phase !== 'lobby') {
+            player.inRace = false;
+          }
           player.ready = false;
           player.pingMs = null;
           player.input = { ...player.input, move: 0, jump: false, brace: false };
@@ -560,13 +567,13 @@ export class RopeboundGameCore {
           player.vy = 0;
           room.notice = room.phase === 'race'
             ? `${player.name} disconnected. Their team can continue; they will spectate until the next round.`
-            : `${player.name} disconnected and can reconnect before the race starts.`;
+            : `${player.name} is reconnecting…`;
           if (room.hostId === player.id) {
             room.hostId = [...room.players.values()]
               .filter((candidate) => candidate.online && candidate.inRace)
               .sort((left, right) => left.order - right.order)[0]?.id ?? null;
           }
-        } else if (!player.online && room.phase !== 'race' && now - player.lastSeenAt > PLAYER_RECORD_RETENTION_MS) {
+        } else if (!player.online && room.phase !== 'race' && now - player.lastSeenAt > effectiveRetention) {
           room.players.delete(player.id);
         }
       }
@@ -805,6 +812,9 @@ function formationPositions(checkpoint, count) {
 }
 
 function teamPlayers(room, team) {
+  if (room.phase === 'lobby') {
+    return teamRoster(room, team).filter((player) => player.inRace);
+  }
   return teamRoster(room, team).filter((player) => player.inRace && player.online);
 }
 

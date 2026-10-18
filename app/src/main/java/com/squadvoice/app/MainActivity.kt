@@ -1480,7 +1480,7 @@ private fun ErrorNotice(message: String) {
     }
 }
 
-private const val ROOM_INVITE_HOST = "squadvoice-api-alok1404-251015-0109.onrender.com"
+private const val ROOM_INVITE_HOST = "voiceover-1.onrender.com"
 
 private fun readInviteRoomCode(intent: Intent?): String? {
     val uri = intent?.data ?: return null

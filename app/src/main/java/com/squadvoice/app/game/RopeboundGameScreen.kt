@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -88,6 +90,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.runtime.withFrameNanos
@@ -148,6 +151,7 @@ internal fun RopeboundGameScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var reconnectAttempt by remember(roomCode) { mutableStateOf(0) }
     val controls = remember(roomCode, participantToken) { MutableStateFlow(GameControlState()) }
+    val inputTrigger = remember(roomCode, participantToken) { Channel<Unit>(Channel.CONFLATED) }
 
     DisposableEffect(gameAudio) {
         onDispose { gameAudio.release() }
@@ -224,7 +228,10 @@ internal fun RopeboundGameScreen(
                 error = null
                 api.events(roomCode, participantToken).collect { event ->
                     when (event) {
-                        is RopeboundRealtimeEvent.State -> snapshot = event.snapshot
+                        is RopeboundRealtimeEvent.State -> {
+                            snapshot = event.snapshot
+                            error = null
+                        }
                         is RopeboundRealtimeEvent.Ping -> {
                             measuredPingMs.updateAndGet { previous ->
                                 previous?.let { (it * .75f + event.roundTripMs * .25f).roundToInt() }
@@ -239,7 +246,6 @@ internal fun RopeboundGameScreen(
                 if (failure is CancellationException) throw failure
                 error = failure.message ?: "Couldn't connect to the Ropebound lobby."
             }
-            if (snapshot == null) return@LaunchedEffect
             delay(1_500)
         }
     }
@@ -248,7 +254,10 @@ internal fun RopeboundGameScreen(
         if (previewMode) return@LaunchedEffect
         if (snapshot?.phase != "lobby" && snapshot?.phase != "race") return@LaunchedEffect
         while (true) {
-            api.heartbeat(measuredPingMs.get())
+            val sent = api.heartbeat(measuredPingMs.get())
+            if (!sent) {
+                runCatching { api.heartbeat(roomCode, participantToken, measuredPingMs.get()) }
+            }
             delay(1_000)
         }
     }
@@ -276,26 +285,31 @@ internal fun RopeboundGameScreen(
                 else -> current
             }
         }
+        inputTrigger.trySend(Unit)
         if (controls.value.move != 0) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
     }
 
     fun setBrace(pressed: Boolean) {
         controls.update { it.copy(bracing = pressed) }
+        inputTrigger.trySend(Unit)
     }
 
     fun openGameSettings() {
         controls.value = GameControlState()
+        inputTrigger.trySend(Unit)
         gameAudio.stopFootsteps()
         gameSettingsOpen = true
     }
 
     fun jump() {
         controls.update { it.copy(jumpSequence = it.jumpSequence + 1) }
+        inputTrigger.trySend(Unit)
     }
 
     LaunchedEffect(snapshot?.phase, snapshot?.viewerSpectating) {
         if (snapshot?.phase != "race" || snapshot?.viewerSpectating == true) {
             controls.value = GameControlState()
+            inputTrigger.trySend(Unit)
             gameAudio.stopFootsteps()
         }
     }
@@ -342,7 +356,14 @@ internal fun RopeboundGameScreen(
                     delay(250)
                 }
             }
-            delay(if (active) 100 else 60)
+            val waitTimeout = when {
+                releaseJumpPulse -> 20L
+                active -> 33L
+                else -> 150L
+            }
+            withTimeoutOrNull(waitTimeout) {
+                inputTrigger.receive()
+            }
         }
     }
 
@@ -591,8 +612,8 @@ private fun LobbyContent(
                 viewerTeam = state.viewerTeam,
                 isHost = state.isHost,
                 freeTeamSwitching = state.freeTeamSwitching,
-                canJoin = !busy && state.viewerTeam == "B" && currentTeamCount > 2 &&
-                    state.teamA.count < 5 && switchingAllowed,
+                canJoin = !busy && (state.viewerTeam == null || (state.viewerTeam == "B" && (currentTeamCount > 2 || state.isHost) && switchingAllowed)) &&
+                    state.teamA.count < 5,
                 onChooseTeam = onChooseTeam,
                 onRequestSwap = { player -> swapSelection = "A" to player },
                 modifier = Modifier.weight(1f),
@@ -607,8 +628,8 @@ private fun LobbyContent(
                 viewerTeam = state.viewerTeam,
                 isHost = state.isHost,
                 freeTeamSwitching = state.freeTeamSwitching,
-                canJoin = !busy && state.viewerTeam == "A" && currentTeamCount > 2 &&
-                    state.teamB.count < 5 && switchingAllowed,
+                canJoin = !busy && (state.viewerTeam == null || (state.viewerTeam == "A" && (currentTeamCount > 2 || state.isHost) && switchingAllowed)) &&
+                    state.teamB.count < 5,
                 onChooseTeam = onChooseTeam,
                 onRequestSwap = { player -> swapSelection = "B" to player },
                 modifier = Modifier.weight(1f),
@@ -707,49 +728,72 @@ private fun TeamCard(
         shape = RoundedCornerShape(18.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Text("$title · ${team.count}/5", fontWeight = FontWeight.Bold)
-            if (team.players.isEmpty() && team.spectators.isEmpty()) {
-                Text("Open team", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-            }
-            team.players.forEach { player ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (team.players.isEmpty() && team.spectators.isEmpty()) {
+                    Text("Open team", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+                team.players.forEach { player ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val statusPrefix = when {
+                            !player.online -> "◌ "
+                            player.ready -> "✓ "
+                            else -> "○ "
+                        }
+                        val statusSuffix = when {
+                            !player.online -> " · connecting…"
+                            player.host -> " · host"
+                            else -> ""
+                        }
+                        Text(
+                            "$statusPrefix${player.name}$statusSuffix",
+                            modifier = Modifier.weight(1f),
+                            fontSize = 12.sp,
+                            color = if (player.online) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        PingBadge(player.pingMs)
+                        if (isHost || (freeTeamSwitching && viewerTeam == teamId && player.id == viewerIdentity)) {
+                            Text(
+                                "Swap",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable(enabled = !busy && player.online) { onRequestSwap(player) }
+                                    .padding(horizontal = 4.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+                team.spectators.forEach { spectator ->
                     Text(
-                        "${if (player.ready) "✓" else "○"} ${player.name}${if (player.host) " · host" else ""}",
-                        modifier = Modifier.weight(1f),
-                        fontSize = 12.sp,
+                        "◦ $spectator",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    PingBadge(player.pingMs)
-                    if (isHost || (freeTeamSwitching && viewerTeam == teamId && player.id == viewerIdentity)) {
-                        Text(
-                            "Swap",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable(enabled = !busy) { onRequestSwap(player) }
-                                .padding(horizontal = 4.dp, vertical = 3.dp),
-                        )
-                    }
                 }
             }
-            team.spectators.forEach { spectator ->
-                Text(
-                    "◦ $spectator",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.weight(1f))
             OutlinedButton(
                 onClick = { onChooseTeam(teamId) },
                 enabled = canJoin && !selected && team.count < 5,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(36.dp),
             ) {
                 Text(
                     when {
@@ -759,6 +803,7 @@ private fun TeamCard(
                         !isHost && !freeTeamSwitching -> "Ask host"
                         else -> "Need 3 on your team"
                     },
+                    fontSize = 11.sp,
                 )
             }
         }
