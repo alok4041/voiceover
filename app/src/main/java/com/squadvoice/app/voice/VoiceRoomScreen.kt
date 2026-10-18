@@ -109,7 +109,7 @@ internal fun VoiceRoomScreen(
             enabled = canPlayRopebound,
         ) {
             Text(
-                if (canPlayRopebound) "Play Ropebound · 2D"
+                if (canPlayRopebound) "Play Ropebound · 3D"
                 else "Waiting for players · ${roomPlayerCount.coerceAtMost(10)}/$MIN_ROPEBOUND_PLAYERS",
             )
         }

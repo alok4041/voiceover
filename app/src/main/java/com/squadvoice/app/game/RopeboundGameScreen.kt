@@ -955,8 +955,8 @@ private fun RaceContent(
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                HoldMoveButton(-1, Modifier.size(56.dp), onMove)
-                HoldMoveButton(1, Modifier.size(56.dp), onMove)
+                HoldMoveButton(-1, topDownCamera, Modifier.size(56.dp), onMove)
+                HoldMoveButton(1, topDownCamera, Modifier.size(56.dp), onMove)
                 Spacer(Modifier.weight(1f))
                 GameActionButton(
                     onClick = onJump,
@@ -1285,17 +1285,25 @@ private fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: F
 @Composable
 private fun HoldMoveButton(
     direction: Int,
+    topDownCamera: Boolean,
     modifier: Modifier = Modifier,
     onMove: (Int, Boolean) -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val icon = when {
+        topDownCamera && direction < 0 -> GameControlIcon.Down
+        topDownCamera -> GameControlIcon.Up
+        direction < 0 -> GameControlIcon.Left
+        else -> GameControlIcon.Right
+    }
 
     GameControlButton(
-        icon = if (direction < 0) GameControlIcon.Left else GameControlIcon.Right,
+        icon = icon,
         description = if (direction < 0) "Move backward" else "Move forward",
         modifier = modifier,
         pressed = pressed,
+        interactionSource = interactionSource,
         onClick = {},
         onPressedChange = { onMove(direction, it) },
     )
@@ -1315,7 +1323,7 @@ private fun HoldBraceButton(onBrace: (Boolean) -> Unit, modifier: Modifier = Mod
     )
 }
 
-private enum class GameControlIcon { Left, Right, Jump, Brace }
+private enum class GameControlIcon { Left, Right, Up, Down, Jump, Brace }
 
 @Composable
 private fun GameActionButton(
@@ -1365,11 +1373,34 @@ private fun GameControlButton(
             val cy = size.height / 2f
             val stroke = 2.7.dp.toPx()
             when (icon) {
-                GameControlIcon.Left, GameControlIcon.Right -> {
-                    val sign = if (icon == GameControlIcon.Left) -1f else 1f
-                    drawLine(ink, Offset(cx - sign * 6.dp.toPx(), cy), Offset(cx + sign * 6.dp.toPx(), cy), stroke, cap = StrokeCap.Round)
-                    drawLine(ink, Offset(cx + sign * 6.dp.toPx(), cy), Offset(cx + sign * 1.dp.toPx(), cy - 5.dp.toPx()), stroke, cap = StrokeCap.Round)
-                    drawLine(ink, Offset(cx + sign * 6.dp.toPx(), cy), Offset(cx + sign * 1.dp.toPx(), cy + 5.dp.toPx()), stroke, cap = StrokeCap.Round)
+                GameControlIcon.Left, GameControlIcon.Right, GameControlIcon.Up, GameControlIcon.Down -> {
+                    val unit = when (icon) {
+                        GameControlIcon.Left -> Offset(-1f, 0f)
+                        GameControlIcon.Right -> Offset(1f, 0f)
+                        GameControlIcon.Up -> Offset(0f, -1f)
+                        else -> Offset(0f, 1f)
+                    }
+                    val perpendicular = Offset(-unit.y, unit.x)
+                    val arrowLength = 7.dp.toPx()
+                    val headLength = 4.dp.toPx()
+                    val headWidth = 4.dp.toPx()
+                    val start = Offset(cx - unit.x * arrowLength, cy - unit.y * arrowLength)
+                    val tip = Offset(cx + unit.x * arrowLength, cy + unit.y * arrowLength)
+                    drawLine(ink, start, tip, stroke, cap = StrokeCap.Round)
+                    drawLine(
+                        ink,
+                        tip,
+                        Offset(tip.x - unit.x * headLength + perpendicular.x * headWidth, tip.y - unit.y * headLength + perpendicular.y * headWidth),
+                        stroke,
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        ink,
+                        tip,
+                        Offset(tip.x - unit.x * headLength - perpendicular.x * headWidth, tip.y - unit.y * headLength - perpendicular.y * headWidth),
+                        stroke,
+                        cap = StrokeCap.Round,
+                    )
                 }
                 GameControlIcon.Jump -> {
                     drawLine(ink, Offset(cx, cy + 8.dp.toPx()), Offset(cx, cy - 7.dp.toPx()), stroke, cap = StrokeCap.Round)

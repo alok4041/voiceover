@@ -2,7 +2,7 @@
 
 ## Purpose and status
 
-This document is the product and implementation reference for the 2D Ropebound game inside SquadVoice. The local working tree contains an early playable implementation: Android lobby and landscape race screen, server-authoritative movement and hazards, and streamed game snapshots. It has not been pushed, deployed, or validated on connected phones. Match state resets if the token server restarts.
+This document is the product and implementation reference for Ropebound, the 3D co-op race game inside SquadVoice. The Android client renders a 3D landscape race scene and camera views; the server remains authoritative for movement, hazards, and match snapshots. Match state resets if the token server restarts.
 
 The game should open from an active SquadVoice voice room. Players keep talking in that room while they play. The game is a coordinated race where each team controls a chain of toy runners joined by a rope that **must never break**.
 
