@@ -31,6 +31,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -105,6 +107,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -411,6 +414,15 @@ private fun SquadVoiceApp(
         }
     }
 
+    fun openRopeboundGame(preview: Boolean) {
+        (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        coroutineScope.launch {
+            delay(250)
+            showLocalGamePreview = preview
+            showRopeboundGame = true
+        }
+    }
+
     BackHandler(enabled = showSettings || showRopeboundGame) {
         if (showSettings) showSettings = false else closeRopeboundGame()
     }
@@ -625,86 +637,87 @@ private fun SquadVoiceApp(
                 onBack = { showSettings = false },
             )
         } else if (isInRoom && activeRoom != null) {
-            if (showRopeboundGame) {
-                RopeboundGameScreen(
-                    roomCode = activeRoom.code,
-                    participantToken = activeRoom.participantToken,
-                    microphoneEnabled = session.micEnabled,
+            Crossfade(
+                targetState = showRopeboundGame,
+                animationSpec = tween(durationMillis = 360),
+                label = "voice-game-transition",
+            ) { gameVisible ->
+                if (gameVisible) {
+                    RopeboundGameScreen(
+                        roomCode = activeRoom.code,
+                        participantToken = activeRoom.participantToken,
+                        microphoneEnabled = session.micEnabled,
+                        onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
+                        onBack = ::closeRopeboundGame,
+                        previewMode = showLocalGamePreview,
+                    )
+                } else VoiceRoomScreen(
+                    room = activeRoom,
+                    session = session,
+                    errorMessage = errorMessage ?: session.errorMessage,
+                    onReconnect = {
+                        errorMessage = null
+                        runCatching { VoiceRoomService.start(context, activeRoom, playerName.trim()) }
+                            .onFailure { error ->
+                                errorMessage = error.message ?: "Android couldn't reconnect to the room."
+                            }
+                    },
+                    pushToTalk = pushToTalk,
+                    overlayEnabled = overlayEnabled,
+                    onOpenSettings = { showSettings = true },
+                    onPlayRopebound = { openRopeboundGame(preview = false) },
+                    onOpenLocalPreview = { if (BuildConfig.DEBUG) openRopeboundGame(preview = true) },
                     onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
-                    onBack = ::closeRopeboundGame,
-                    previewMode = showLocalGamePreview,
-                )
-            } else VoiceRoomScreen(
-                room = activeRoom,
-                session = session,
-                errorMessage = errorMessage ?: session.errorMessage,
-                onReconnect = {
-                    errorMessage = null
-                    runCatching { VoiceRoomService.start(context, activeRoom, playerName.trim()) }
-                        .onFailure { error ->
-                            errorMessage = error.message ?: "Android couldn't reconnect to the room."
+                    onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
+                    onSetParticipantVolume = { identity, volumePercent ->
+                        VoiceSessionManager.setParticipantVolume(identity, volumePercent)
+                    },
+                    onTogglePushToTalk = { enabled ->
+                        pushToTalk = enabled
+                    },
+                    onCopyCode = { copyRoomCode(context, activeRoom.code) },
+                    onShareCode = { shareRoomCode(context, activeRoom.code) },
+                    onToggleOverlay = {
+                        if (OverlayControlsService.isRunning) {
+                            OverlayControlsService.stop(context)
+                            overlayEnabled = false
+                            preferences.edit().putBoolean("overlay_enabled", false).apply()
+                        } else if (Settings.canDrawOverlays(context)) {
+                            OverlayControlsService.start(context)
+                            overlayEnabled = true
+                            preferences.edit().putBoolean("overlay_enabled", true).apply()
+                        } else {
+                            overlayPermissionLauncher.launch(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}"),
+                                ),
+                            )
                         }
-                },
-                pushToTalk = pushToTalk,
-                overlayEnabled = overlayEnabled,
-                onOpenSettings = { showSettings = true },
-                onPlayRopebound = { showRopeboundGame = true },
-                onOpenLocalPreview = {
-                    if (BuildConfig.DEBUG) {
-                        showLocalGamePreview = true
-                        showRopeboundGame = true
-                    }
-                },
-                onToggleMicrophone = { VoiceSessionManager.toggleMicrophone() },
-                onSetMicrophone = { enabled -> VoiceSessionManager.setMicrophoneEnabled(enabled) },
-                onSetParticipantVolume = { identity, volumePercent ->
-                    VoiceSessionManager.setParticipantVolume(identity, volumePercent)
-                },
-                onTogglePushToTalk = { enabled ->
-                    pushToTalk = enabled
-                },
-                onCopyCode = { copyRoomCode(context, activeRoom.code) },
-                onShareCode = { shareRoomCode(context, activeRoom.code) },
-                onToggleOverlay = {
-                    if (OverlayControlsService.isRunning) {
+                    },
+                    onLeave = {
+                        VoiceRoomService.leave(context)
                         OverlayControlsService.stop(context)
+                        preferences.edit()
+                            .remove("room_code")
+                            .remove("room_name")
+                            .remove("server_url")
+                            .remove("participant_token")
+                            .remove("overlay_enabled")
+                            .apply()
+                        savedRoomCode = null
+                        savedRoomName = null
+                        savedServerUrl = null
+                        savedParticipantToken = null
+                        isInRoom = false
+                        showRopeboundGame = false
+                        showLocalGamePreview = false
                         overlayEnabled = false
-                        preferences.edit().putBoolean("overlay_enabled", false).apply()
-                    } else if (Settings.canDrawOverlays(context)) {
-                        OverlayControlsService.start(context)
-                        overlayEnabled = true
-                        preferences.edit().putBoolean("overlay_enabled", true).apply()
-                    } else {
-                        overlayPermissionLauncher.launch(
-                            Intent(
-                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}"),
-                            ),
-                        )
-                    }
-                },
-                onLeave = {
-                    VoiceRoomService.leave(context)
-                    OverlayControlsService.stop(context)
-                    preferences.edit()
-                        .remove("room_code")
-                        .remove("room_name")
-                        .remove("server_url")
-                        .remove("participant_token")
-                        .remove("overlay_enabled")
-                        .apply()
-                    savedRoomCode = null
-                    savedRoomName = null
-                    savedServerUrl = null
-                    savedParticipantToken = null
-                    isInRoom = false
-                    showRopeboundGame = false
-                    showLocalGamePreview = false
-                    overlayEnabled = false
-                    pushToTalk = false
-                    errorMessage = null
-                },
-            )
+                        pushToTalk = false
+                        errorMessage = null
+                    },
+                )
+            }
         } else {
             HomeScreen(
                 playerName = playerName,

@@ -101,7 +101,7 @@ private fun RopeboundPlayerNameplates(team: RopeboundTeam, viewerIdentity: Strin
         Matrix.multiplyMM(viewProjection, 0, projection, 0, camera, 0)
         team.players.forEachIndexed { index, player ->
             val z = (player.progress - cameraProgress) * 100f * .80f
-            val x = (index - (team.players.size - 1) / 2f) * 1.22f
+            val x = (index - (team.players.size - 1) / 2f) * 1.22f + player.lateralOffset.coerceIn(-1.25f, 1.25f)
             val y = 2.25f + (player.height / 12f).coerceIn(-.35f, .5f) * 2.6f
             val clip = FloatArray(4)
             Matrix.multiplyMV(clip, 0, viewProjection, 0, floatArrayOf(x, y, z, 1f), 0)
@@ -424,9 +424,30 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
         // 1. Layered Sky & Majestic Mountain Backdrop
         drawMountainVista(mesh, time)
 
-        // 2. Main Ground Terrain
-        mesh.plane(-38f, 38f, -24f, 102f, -.30f, Rgb(.24f, .50f, .22f))
-        mesh.plane(-38f, 38f, -24f, 102f, -.31f, Rgb(.34f, .59f, .26f))
+        // 2. Main Ground Terrain. Leave the river channel open so its surface
+        // sits below the banks and bridge instead of drawing over the path.
+        val riverSections = state.obstacles
+            .filter { it.id == "river-bridge" || it.id == "river-gap" }
+            .map { obstacle ->
+                (zAt(obstacle.start) - 1.4f).coerceAtLeast(-24f) to
+                    (zAt(obstacle.end) + 1.4f).coerceAtMost(102f)
+            }
+            .filter { it.second > it.first }
+            .sortedBy { it.first }
+        fun drawTerrainLayer(y: Float, color: Rgb) {
+            var cursor = -24f
+            riverSections.forEach { (riverNear, riverFar) ->
+                if (riverNear > cursor) mesh.plane(-38f, 38f, cursor, riverNear, y, color)
+                // Keep both river banks continuous while cutting out only the
+                // water width used by buildRiver (x = -23..23).
+                mesh.plane(-38f, -23f, riverNear, riverFar, y, color)
+                mesh.plane(23f, 38f, riverNear, riverFar, y, color)
+                cursor = max(cursor, riverFar)
+            }
+            if (cursor < 102f) mesh.plane(-38f, 38f, cursor, 102f, y, color)
+        }
+        drawTerrainLayer(-.30f, Rgb(.24f, .50f, .22f))
+        drawTerrainLayer(-.31f, Rgb(.34f, .59f, .26f))
 
         // 3. Trail Pathway with gaps for hazards
         var roadZ = -18f
@@ -443,13 +464,14 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
             val side = if (tree % 2 == 0) -1f else 1f
             val x = side * (6.8f + (tree % 5) * 1.85f)
             val z = -6f + (tree * 5.9f + cameraProgress * courseScale * .35f) % 68f
+            if (riverSections.any { z in it.first..it.second }) continue
             val species = tree % 3
             val scale = .82f + (tree % 4) * .12f
             drawStylizedTree(mesh, x, z, species, scale, time)
         }
 
         // 5. Waving Grassland & Wildflowers
-        drawMeadows(mesh, cameraProgress, courseScale, time)
+        drawMeadows(mesh, cameraProgress, courseScale, time, riverSections)
 
         // 6. Obstacles & Hazards
         state.obstacles.forEach { obstacle ->
@@ -511,7 +533,7 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
         for (playerIndex in state.team.players.indices) {
             val player = state.team.players[playerIndex]
             val z = (player.progress - cameraProgress) * 100f * courseScale
-            val x = (playerIndex - (state.team.players.size - 1) / 2f) * 1.22f
+            val x = (playerIndex - (state.team.players.size - 1) / 2f) * 1.22f + player.lateralOffset.coerceIn(-1.25f, 1.25f)
             val jump = (player.height / 12f).coerceIn(-.35f, .5f) * 2.6f
             drawRunner(mesh, player, x, z, jump, playerIndex, time)
         }
@@ -521,8 +543,8 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
             val first = pair.first; val second = pair.second
             val z0 = (first.progress - cameraProgress) * 100f * courseScale
             val z1 = (second.progress - cameraProgress) * 100f * courseScale
-            val x0 = (index - (state.team.players.size - 1) / 2f) * 1.22f
-            val x1 = (index + 1 - (state.team.players.size - 1) / 2f) * 1.22f
+            val x0 = (index - (state.team.players.size - 1) / 2f) * 1.22f + first.lateralOffset.coerceIn(-1.25f, 1.25f)
+            val x1 = (index + 1 - (state.team.players.size - 1) / 2f) * 1.22f + second.lateralOffset.coerceIn(-1.25f, 1.25f)
             val distance = abs(first.progress - second.progress)
             val jump0 = (first.height / 12f).coerceIn(-.35f, .5f) * 2.6f
             val jump1 = (second.height / 12f).coerceIn(-.35f, .5f) * 2.6f
@@ -647,11 +669,20 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
         }
     }
 
-    private fun drawMeadows(mesh: TriangleMesh, cameraProgress: Float, courseScale: Float, time: Float) {
+    private fun drawMeadows(
+        mesh: TriangleMesh,
+        cameraProgress: Float,
+        courseScale: Float,
+        time: Float,
+        riverSections: List<Pair<Float, Float>>,
+    ) {
         for (tuft in 0 until 115) {
             val side = if (tuft % 2 == 0) -1f else 1f
             val x = side * (3.85f + (tuft % 8) * .48f)
             val z = -8f + (tuft * 3.25f + cameraProgress * courseScale * .75f) % 58f
+            // Meadow flowers and blades grow on the course banks, never in the
+            // open river channel or over its bridge approach.
+            if (riverSections.any { z in it.first..it.second }) continue
             val windWave = sin(time * 2.5f + x * .4f + z * .6f) * .14f
             val green = when (tuft % 4) {
                 0 -> Rgb(.68f, .82f, .28f)
@@ -756,13 +787,19 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
         val nx = 42
         val nz = 10
 
-        // Multi-frequency wave displacement function for dynamic water movement
+        // Keep the water plane in a lower river channel. The wave amplitude is
+        // deliberately smaller than the bridge clearance, so crests cannot
+        // rise through the deck or appear above the banks.
         fun waterLevel(x: Float, z: Float): Float {
-            val wave1 = sin(time * 2.6f + x * .38f + z * 1.5f) * .11f
-            val wave2 = sin(time * 3.8f - x * .52f + z * .92f) * .055f
-            val chop = sin(time * 5.4f + (x + z) * 1.15f) * .024f
-            return -.13f + wave1 + wave2 + chop
+            val wave1 = sin(time * 2.2f + x * .34f + z * 1.2f) * .05f
+            val wave2 = sin(time * 3.1f - x * .44f + z * .78f) * .027f
+            val chop = sin(time * 4.3f + (x + z) * .92f) * .012f
+            return (-.66f + wave1 + wave2 + chop).coerceIn(-.75f, -.57f)
         }
+
+        // A dark riverbed gives the lowered water a visible depth beneath the
+        // bridge; sloped shore faces join the water to the grassy banks.
+        mesh.plane(-23f, 23f, near, far, -.98f, Rgb(.10f, .20f, .22f))
 
         // 1. Dynamic Water Mesh with Sun Glints & Depth Tinting
         for (ix in 0 until nx) {
@@ -779,14 +816,12 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
                 val p2 = Point3(x1, y11, b); val p3 = Point3(x1, y10, a)
 
                 val waveHeight = (y00 + y01 + y11 + y10) * .25f
-                val shimmer = .82f + .18f * sin(ix * .75f + iz * .65f + time * 2.2f)
-                val isCrest = waveHeight > -.09f
-
-                val waterColor = when {
-                    isCrest -> Rgb(.22f * shimmer, .68f * shimmer, .78f)
-                    (ix + iz) % 4 == 0 -> Rgb(.06f * shimmer, .48f * shimmer, .66f)
-                    else -> Rgb(.035f * shimmer, .36f * shimmer, .54f)
-                }
+                val crest = ((waveHeight + .66f) / .09f).coerceIn(-1f, 1f)
+                val caustic = .5f + .5f * sin(ix * .38f - iz * .24f + time * 1.7f)
+                val shimmer = .78f + (crest + 1f) * .055f + caustic * .08f
+                // Continuous tonal variation follows the travelling wave;
+                // alternating checker tiles made the river look like a grid.
+                val waterColor = Rgb(.03f * shimmer, .34f * shimmer, .52f * shimmer)
                 mesh.quad(p0, p1, p2, p3, waterColor)
             }
         }
@@ -796,19 +831,36 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
             val laneX = -19f + (foam % 5) * 9.5f + sin(time * 1.2f + foam * 1.7f) * .65f
             val travel = (time * .28f + foam * .143f) % 1f
             val z = near + riverLength * travel
-            val y = waterLevel(laneX, z) + .022f
+            val startX = laneX - .85f
+            val startZ = z - .15f
+            val endX = laneX + .85f
+            val endZ = z + .28f
+            // Foam rides just inside the moving water surface; no separate
+            // airborne spray particles are used in this calm river section.
+            val startY = waterLevel(startX, startZ) - .014f
+            val endY = waterLevel(endX, endZ) - .014f
+            val sparkleX = laneX + .35f
+            val sparkleZ = z + .1f
+            val sparkleY = waterLevel(sparkleX, sparkleZ) - .014f
             val sprayColor = if (foam % 2 == 0) Rgb(.88f, .97f, .99f) else Rgb(.68f, .92f, .95f)
-            mesh.rod(Point3(laneX - .85f, y, z - .15f), Point3(laneX + .85f, y + .018f, z + .28f), .026f, sprayColor, 5)
-            mesh.sphere(Point3(laneX + .35f, y + .035f, z + .1f), .055f, sprayColor, 5, 3)
+            mesh.rod(Point3(startX, startY, startZ), Point3(endX, endY, endZ), .016f, sprayColor, 5)
+            mesh.sphere(Point3(sparkleX, sparkleY, sparkleZ), .016f, sprayColor, 5, 3)
         }
 
         // 3. Lush Riverbanks, Sandy Shorelines & River Stones
         for ((bankIndex, bankZ) in listOf(near, far).withIndex()) {
             val landSign = if (bankIndex == 0) -1f else 1f
 
-            // Sandy moist shore band
+            // A short sloped shore connects the raised bank to the lower water.
             val shoreColor = Rgb(.68f, .62f, .46f)
-            mesh.plane(-24f, 24f, bankZ + landSign * .45f, bankZ, -.065f, shoreColor)
+            val shoreTopZ = bankZ + landSign * .8f
+            mesh.quad(
+                Point3(-23f, -.68f, bankZ),
+                Point3(-23f, -.30f, shoreTopZ),
+                Point3(23f, -.30f, shoreTopZ),
+                Point3(23f, -.68f, bankZ),
+                shoreColor,
+            )
 
             // Grassy bank embankment
             val grassColor = if (bankIndex == 0) Rgb(.44f, .68f, .24f) else Rgb(.38f, .62f, .22f)
@@ -818,7 +870,9 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
             for (rock in 0..24) {
                 val x = -22f + rock * 1.85f + sin(rock * 2.3f + bankIndex) * .42f
                 val stagger = sin(rock * 1.8f + bankIndex * 2.5f) * .35f
-                val rz = bankZ + landSign * (.12f + stagger)
+                // Keep stones rooted on the sloped bank, with only their
+                // outer edges reaching the waterline.
+                val rz = bankZ + landSign * (.88f + stagger * .18f)
                 val scale = .62f + (rock % 5) * .15f
                 val rockColor = when (rock % 4) {
                     0 -> Rgb(.52f, .54f, .50f)
@@ -831,7 +885,18 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
                 // Shoreline foam hugging rocks
                 if (rock % 3 == 0) {
                     val foamZ = rz - landSign * .22f
-                    mesh.rod(Point3(x - .45f, -.04f, foamZ), Point3(x + .45f, -.035f, foamZ + landSign * .08f), .022f, Rgb(.82f, .94f, .96f), 4)
+                    val foamStartX = x - .45f
+                    val foamEndX = x + .45f
+                    val foamEndZ = foamZ + landSign * .08f
+                    val foamStartY = waterLevel(foamStartX, foamZ) - .012f
+                    val foamEndY = waterLevel(foamEndX, foamEndZ) - .012f
+                    mesh.rod(
+                        Point3(foamStartX, foamStartY, foamZ),
+                        Point3(foamEndX, foamEndY, foamEndZ),
+                        .014f,
+                        Rgb(.82f, .94f, .96f),
+                        4,
+                    )
                 }
             }
 
@@ -839,13 +904,17 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
             for (reed in 0..15) {
                 val side = if (reed % 2 == 0) -1f else 1f
                 val x = side * (4.6f + (reed / 2) * .95f)
-                val z = bankZ + side * .32f
+                val shoreDistance = .48f + (reed % 4) * .12f
+                val z = bankZ + landSign * shoreDistance
                 val sway = sin(time * 2.4f + reed * .85f) * .11f
                 val height = .46f + (reed % 4) * .14f
+                // Root emergent plants into the sloped shoreline instead of
+                // starting them at y=0 above the water or bank surface.
+                val rootY = -.68f + .38f * (shoreDistance / .8f).coerceIn(0f, 1f)
                 val green = if (reed % 3 == 0) Rgb(.36f, .62f, .26f) else Rgb(.26f, .52f, .24f)
-                mesh.rod(Point3(x, 0f, z), Point3(x + sway, height, z + .04f), .024f, green, 5)
+                mesh.rod(Point3(x, rootY, z), Point3(x + sway, rootY + height, z + .04f), .024f, green, 5)
                 // Cattail brown tips
-                mesh.sphere(Point3(x + sway * 1.1f, height + .04f, z + .04f), .038f, Rgb(.38f, .22f, .12f), 5, 3)
+                mesh.sphere(Point3(x + sway * 1.1f, rootY + height + .04f, z + .04f), .038f, Rgb(.38f, .22f, .12f), 5, 3)
             }
         }
 
@@ -1025,7 +1094,7 @@ private class Ropebound3DRenderer : GLSurfaceView.Renderer {
         val hair=hairPalette[styleSeed%hairPalette.size]
         val skin=skinPalette[(styleSeed/3)%skinPalette.size]
         val pack=palette[(index+2)%palette.size].shade(.84f)
-        val running=player.velocity>.35f && player.grounded && !player.bracing
+        val running=abs(player.velocity)>.35f && player.grounded && !player.bracing
         val phase=time*9f+index*.7f
         val stride=if(running) sin(phase)*.28f else 0f
         val idleBreath=if(running) abs(cos(phase))*.025f else sin(time*2.2f+index)*.018f

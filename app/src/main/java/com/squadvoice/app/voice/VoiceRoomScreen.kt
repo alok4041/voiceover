@@ -126,10 +126,10 @@ internal fun VoiceRoomScreen(
                 modifier = Modifier.fillMaxWidth().height(46.dp),
                 shape = RoundedCornerShape(14.dp),
             ) {
-                Text("Preview playground · 4 local demo runners")
+                Text("Review playground · lobby + race")
             }
             Text(
-                "Visual preview only. Live multiplayer still requires four connected players.",
+                "Preview both teams and the race with four local demo runners. Live multiplayer still needs four connected players.",
                 modifier = Modifier.padding(horizontal = 4.dp),
                 fontSize = 10.sp,
                 color = MutedText,

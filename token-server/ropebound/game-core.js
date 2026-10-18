@@ -101,11 +101,13 @@ export class RopeboundGameCore {
       inRace: true,
       ready: false,
       x: Math.max(0, CHECKPOINTS[0] - teamPosition * TEAM_START_SPACING),
+      lateralOffset: 0,
       y: 0,
       vx: 0,
+      lateralVelocity: 0,
       vy: 0,
       grounded: true,
-      input: { seq: -1, move: 0, jump: false, brace: false },
+      input: { seq: -1, move: 0, steer: 0, jump: false, brace: false },
       lastInputAt: 0,
       inputExpiresAt: 0,
       wasJumpPressed: false,
@@ -273,11 +275,13 @@ export class RopeboundGameCore {
         player.inRace = player.online;
         player.ready = false;
         player.x = positions[index];
+        player.lateralOffset = 0;
         player.y = 0;
         player.vx = 0;
+        player.lateralVelocity = 0;
         player.vy = 0;
         player.grounded = true;
-        player.input = { ...player.input, move: 0, jump: false, brace: false };
+        player.input = { ...player.input, move: 0, steer: 0, jump: false, brace: false };
         player.lastInputAt = 0;
         player.inputExpiresAt = 0;
         player.wasJumpPressed = false;
@@ -311,15 +315,27 @@ export class RopeboundGameCore {
     if (!player.online || !player.inRace) throw new GameError('You are spectating this race. Rejoin the team in the next round.', 'player_spectating');
     const seq = Number(payload?.seq);
     const move = Number(payload?.move);
+    const steer = Number(payload?.steer ?? 0);
     const now = Date.now();
     if (now - player.lastInputAt < 30) throw new GameError('Controls are arriving too quickly.', 'input_rate_limited');
     if (!Number.isSafeInteger(seq) || seq <= player.input.seq) {
       throw new GameError('Input sequence must increase.', 'stale_input');
     }
-    if (!Number.isFinite(move) || ![-1, 0, 1].includes(move)) {
-      throw new GameError('Move must be -1, 0, or 1.', 'invalid_input');
+    if (!Number.isFinite(move) || move < -1 || move > 1) {
+      throw new GameError('Move must be between -1 and 1.', 'invalid_input');
     }
-    player.input = { seq, move, jump: payload?.jump === true, brace: payload?.brace === true };
+    if (!Number.isFinite(steer) || steer < -1 || steer > 1) {
+      throw new GameError('Steering must be between -1 and 1.', 'invalid_input');
+    }
+    const inputMagnitude = Math.hypot(move, steer);
+    const inputScale = inputMagnitude > 1 ? 1 / inputMagnitude : 1;
+    player.input = {
+      seq,
+      move: move * inputScale,
+      steer: steer * inputScale,
+      jump: payload?.jump === true,
+      brace: payload?.brace === true,
+    };
     player.lastInputAt = now;
     player.lastSeenAt = now;
     player.inputExpiresAt = now + INPUT_HOLD_MS;
@@ -336,7 +352,7 @@ export class RopeboundGameCore {
       const members = teamPlayers(room, team);
       for (const player of members) {
         const oldX = player.x;
-        const input = now <= player.inputExpiresAt ? player.input : { move: 0, jump: false, brace: false };
+        const input = now <= player.inputExpiresAt ? player.input : { move: 0, steer: 0, jump: false, brace: false };
         const isBracing = input.brace;
         const jumpPressed = input.jump && !player.wasJumpPressed;
         player.wasJumpPressed = input.jump;
@@ -348,14 +364,21 @@ export class RopeboundGameCore {
           room.notice = `${player.name} jumped.`;
         }
 
-        const surgeMultiplier = surgeActive && input.move === 1 ? 1.2 : 1;
+        const surgeMultiplier = surgeActive && input.move > 0.9 ? 1.2 : 1;
         const acceleration = input.move * RUN_ACCELERATION * (isBracing ? 0.55 : 1) * surgeMultiplier;
         player.vx += acceleration * dt;
-        if (input.move === 0) player.vx *= Math.max(0, 1 - 8 * dt);
+        if (Math.abs(input.move) < 0.04) player.vx *= Math.max(0, 1 - 8 * dt);
         const hazard = room.hazards.find((item) => player.x >= item.start && player.x <= item.end);
         if (hazard?.action === 'brace' && !isBracing) player.vx -= 7 * dt;
         player.vx = clamp(player.vx, -MAX_RUN_SPEED * 0.45, MAX_RUN_SPEED * (surgeActive ? 1.2 : 1));
         player.x = clamp(player.x + player.vx * dt, 0, COURSE_LENGTH);
+
+        const steer = input.steer ?? 0;
+        player.lateralVelocity += steer * 20 * dt;
+        if (steer === 0) player.lateralVelocity *= Math.max(0, 1 - 9 * dt);
+        player.lateralVelocity = clamp(player.lateralVelocity, -2.6, 2.6);
+        player.lateralOffset = clamp(player.lateralOffset + player.lateralVelocity * dt, -1.25, 1.25);
+        if (Math.abs(player.lateralOffset) >= 1.25) player.lateralVelocity = 0;
 
         const boulder = room.hazards.find((item) => item.id === BOULDER.id);
         const onBoulder = boulder && player.x >= boulder.start && player.x <= boulder.end;
@@ -496,8 +519,9 @@ export class RopeboundGameCore {
             ready: player.ready,
             online: player.online,
             progress: Number((player.x / COURSE_LENGTH).toFixed(3)),
+            lateralOffset: Number(player.lateralOffset.toFixed(3)),
             height: Number(player.y.toFixed(2)),
-            velocity: Number(player.vx.toFixed(2)),
+            velocity: Number(Math.hypot(player.vx, player.lateralVelocity).toFixed(2)),
             grounded: player.grounded,
             jumping: !player.grounded && player.y >= 0,
             bracing: player.input.brace && player.inputExpiresAt >= Date.now(),
@@ -561,9 +585,11 @@ export class RopeboundGameCore {
           }
           player.ready = false;
           player.pingMs = null;
-          player.input = { ...player.input, move: 0, jump: false, brace: false };
+          player.input = { ...player.input, move: 0, steer: 0, jump: false, brace: false };
           player.inputExpiresAt = 0;
           player.vx = 0;
+          player.lateralVelocity = 0;
+          player.lateralOffset = 0;
           player.vy = 0;
           room.notice = room.phase === 'race'
             ? `${player.name} disconnected. Their team can continue; they will spectate until the next round.`
@@ -609,7 +635,7 @@ export class RopeboundGameCore {
       Math.abs(members[index].x - player.x) <= MAX_ROPE_GAP * 0.68,
     );
     const runningTogether = members.length >= 2 && members.every((player) =>
-      now <= player.inputExpiresAt && player.input.move === 1 && !player.input.brace && player.grounded,
+      now <= player.inputExpiresAt && player.input.move > 0.9 && !player.input.brace && player.grounded,
     );
 
     if (now >= surge.cooldownUntil && runningTogether && ropeTogether && !inHazard) {
@@ -660,11 +686,13 @@ export class RopeboundGameCore {
     const positions = formationPositions(room.checkpoints[team], members.length);
     members.forEach((player, index) => {
       player.x = positions[index];
+      player.lateralOffset = 0;
       player.y = 0;
       player.vx = 0;
+      player.lateralVelocity = 0;
       player.vy = 0;
       player.grounded = true;
-      player.input = { ...player.input, move: 0, jump: false, brace: false };
+      player.input = { ...player.input, move: 0, steer: 0, jump: false, brace: false };
       player.inputExpiresAt = 0;
       player.wasJumpPressed = false;
       player.crumblyEnteredAt = null;

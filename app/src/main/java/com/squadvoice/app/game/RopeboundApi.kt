@@ -31,6 +31,7 @@ internal data class RopeboundPlayer(
     val name: String,
     val ready: Boolean,
     val progress: Float,
+    val lateralOffset: Float = 0f,
     val height: Float,
     val velocity: Float,
     val grounded: Boolean,
@@ -208,14 +209,16 @@ internal class RopeboundApi(
 
     fun input(
         seq: Long,
-        move: Int = 0,
+        move: Float = 0f,
+        steer: Float = 0f,
         jump: Boolean = false,
         brace: Boolean = false,
     ): Boolean = realtimeSocket.get()?.send(
         JSONObject()
                 .put("type", "input")
                 .put("seq", seq)
-                .put("move", move)
+                .put("move", move.coerceIn(-1f, 1f))
+                .put("steer", steer.coerceIn(-1f, 1f))
                 .put("jump", jump)
                 .put("brace", brace)
                 .toString(),
@@ -358,6 +361,7 @@ internal class RopeboundApi(
                             name = player.optString("name", "Player"),
                             ready = player.optBoolean("ready"),
                             progress = player.optDouble("progress").toFloat(),
+                            lateralOffset = player.optDouble("lateralOffset").toFloat(),
                             height = player.optDouble("height").toFloat(),
                             velocity = player.optDouble("velocity").toFloat(),
                             grounded = player.optBoolean("grounded", true),

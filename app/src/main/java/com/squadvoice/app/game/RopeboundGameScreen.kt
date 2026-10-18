@@ -3,7 +3,9 @@ package com.squadvoice.app.game
 import android.content.res.Configuration
 import android.graphics.Paint as AndroidPaint
 import android.graphics.Typeface
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +18,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,7 +58,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +76,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -92,6 +99,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
+import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.runtime.withFrameNanos
 import com.squadvoice.app.R
@@ -102,18 +110,11 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private data class GameControlState(
-    val backHeld: Boolean = false,
-    val runHeld: Boolean = false,
+    val move: Float = 0f,
+    val steer: Float = 0f,
     val bracing: Boolean = false,
     val jumpSequence: Long = 0,
-) {
-    val move: Int
-        get() = when {
-            backHeld && !runHeld -> -1
-            runHeld && !backHeld -> 1
-            else -> 0
-        }
-}
+)
 
 @Composable
 internal fun RopeboundGameScreen(
@@ -127,11 +128,20 @@ internal fun RopeboundGameScreen(
     val api = remember { RopeboundApi() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current.applicationContext
+    val hudPreferences = remember(context) { context.getSharedPreferences("ropebound_hud", android.content.Context.MODE_PRIVATE) }
     val gameAudio = remember(context) { RopeboundGameAudio(context) }
     var soundEnabled by remember(gameAudio) { mutableStateOf(gameAudio.isEnabled()) }
     var ambienceVolume by remember(gameAudio) { mutableStateOf(gameAudio.ambienceVolume()) }
     var sfxVolume by remember(gameAudio) { mutableStateOf(gameAudio.sfxVolume()) }
     var gameSettingsOpen by remember { mutableStateOf(false) }
+    var hudOpacity by remember { mutableStateOf(hudPreferences.getFloat("opacity", .88f).coerceIn(.35f, 1f)) }
+    var hudEditMode by remember { mutableStateOf(false) }
+    var joystickPosition by remember {
+        mutableStateOf(Offset(hudPreferences.getFloat("stick_x", .025f), hudPreferences.getFloat("stick_y", .67f)))
+    }
+    var jumpPosition by remember {
+        mutableStateOf(Offset(hudPreferences.getFloat("jump_x", .78f), hudPreferences.getFloat("jump_y", .78f)))
+    }
     var hasInitializedGameEffect by remember(roomCode) { mutableStateOf(false) }
     var observedGameEffectId by remember(roomCode) { mutableStateOf<Long?>(null) }
     var hasInitializedNotice by remember(roomCode) { mutableStateOf(false) }
@@ -144,7 +154,7 @@ internal fun RopeboundGameScreen(
         if (previewMode) "preview1" else participantIdentity(participantToken)
     }
     var snapshot by remember(roomCode, previewMode) {
-        mutableStateOf(if (previewMode) localPreviewSnapshot() else null)
+        mutableStateOf(if (previewMode) localPreviewLobbySnapshot() else null)
     }
     val measuredPingMs = remember(roomCode, participantToken) { AtomicReference<Int?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -155,6 +165,16 @@ internal fun RopeboundGameScreen(
 
     DisposableEffect(gameAudio) {
         onDispose { gameAudio.release() }
+    }
+
+    LaunchedEffect(hudOpacity, joystickPosition, jumpPosition) {
+        hudPreferences.edit()
+            .putFloat("opacity", hudOpacity)
+            .putFloat("stick_x", joystickPosition.x)
+            .putFloat("stick_y", joystickPosition.y)
+            .putFloat("jump_x", jumpPosition.x)
+            .putFloat("jump_y", jumpPosition.y)
+            .apply()
     }
 
     LaunchedEffect(snapshot?.phase, soundEnabled) {
@@ -277,16 +297,10 @@ internal fun RopeboundGameScreen(
         }
     }
 
-    fun setMove(direction: Int, pressed: Boolean) {
-        controls.update { current ->
-            when (direction) {
-                -1 -> current.copy(backHeld = pressed)
-                1 -> current.copy(runHeld = pressed)
-                else -> current
-            }
-        }
+    fun setStick(move: Float, steer: Float) {
+        controls.update { it.copy(move = move.coerceIn(-1f, 1f), steer = steer.coerceIn(-1f, 1f)) }
         inputTrigger.trySend(Unit)
-        if (controls.value.move != 0) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
+        if (abs(controls.value.move) > .12f || abs(controls.value.steer) > .12f) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
     }
 
     fun setBrace(pressed: Boolean) {
@@ -301,9 +315,20 @@ internal fun RopeboundGameScreen(
         gameSettingsOpen = true
     }
 
+    var jumpRequestBlockedUntil by remember(roomCode, participantToken) { mutableLongStateOf(0L) }
     fun jump() {
+        val current = snapshot ?: return
+        if (current.phase != "race" || current.viewerSpectating) return
+        val ownTeam = if (current.viewerTeam == "A") current.teamA else current.teamB
+        val ownPlayer = ownTeam.players.firstOrNull { it.id == identity } ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (!ownPlayer.grounded || now < jumpRequestBlockedUntil) return
+        // Match the server's ~1.28s jump flight so stale grounded snapshots
+        // cannot turn repeated taps into phantom mid-air jumps.
+        jumpRequestBlockedUntil = now + 1_250L
         controls.update { it.copy(jumpSequence = it.jumpSequence + 1) }
         inputTrigger.trySend(Unit)
+        gameAudio.play(RopeboundGameAudio.Cue.JUMP)
     }
 
     LaunchedEffect(snapshot?.phase, snapshot?.viewerSpectating) {
@@ -319,36 +344,44 @@ internal fun RopeboundGameScreen(
         if (snapshot?.phase != "race" || snapshot?.viewerSpectating == true) return@LaunchedEffect
 
         var sequence = System.currentTimeMillis() * 1_000L
-        var lastMove: Int? = null
+        var lastMove: Float? = null
+        var lastSteer: Float? = null
         var lastBrace: Boolean? = null
+        var lastJump: Boolean? = null
         var sentJumpSequence = controls.value.jumpSequence
-        var releaseJumpPulse = false
+        var jumpPulseUntil = 0L
+        var lastSentAt = 0L
 
         while (true) {
             val current = controls.value
-            if (current.move != 0) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
-            val jumpPending = current.jumpSequence > sentJumpSequence
-            val sendJumpPulse = jumpPending && !releaseJumpPulse
-            val active = current.move != 0 || current.bracing
-            val needsSend = active || current.move != lastMove || current.bracing != lastBrace || sendJumpPulse || releaseJumpPulse
+            val now = SystemClock.elapsedRealtime()
+            if (current.jumpSequence > sentJumpSequence) jumpPulseUntil = maxOf(jumpPulseUntil, now + 150L)
+            val jumpActive = now < jumpPulseUntil
+            if (abs(current.move) > .12f || abs(current.steer) > .12f) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
+            val active = abs(current.move) > .04f || abs(current.steer) > .04f || current.bracing || jumpActive
+            val needsSend = active || current.move != lastMove || current.steer != lastSteer || current.bracing != lastBrace || jumpActive != lastJump
 
             if (needsSend) {
+                val sinceLastSend = now - lastSentAt
+                if (lastSentAt != 0L && sinceLastSend < 50L) {
+                    delay(50L - sinceLastSend)
+                    continue
+                }
                 try {
                     val sent = api.input(
                         seq = ++sequence,
                         move = current.move,
-                        jump = sendJumpPulse,
+                        steer = current.steer,
+                        jump = jumpActive,
                         brace = current.bracing,
                     )
                     if (!sent) throw IllegalStateException("Reconnecting to the live game server…")
                     lastMove = current.move
+                    lastSteer = current.steer
                     lastBrace = current.bracing
-                    if (sendJumpPulse) {
-                        sentJumpSequence = current.jumpSequence
-                        releaseJumpPulse = true
-                    } else if (releaseJumpPulse) {
-                        releaseJumpPulse = false
-                    }
+                    lastJump = jumpActive
+                    if (jumpActive) sentJumpSequence = current.jumpSequence
+                    lastSentAt = SystemClock.elapsedRealtime()
                     error = null
                 } catch (failure: Throwable) {
                     if (failure is CancellationException) throw failure
@@ -356,28 +389,76 @@ internal fun RopeboundGameScreen(
                     delay(250)
                 }
             }
-            val waitTimeout = when {
-                releaseJumpPulse -> 20L
-                active -> 33L
-                else -> 150L
-            }
+            val waitTimeout = if (active) 50L else 150L
             withTimeoutOrNull(waitTimeout) {
                 inputTrigger.receive()
             }
         }
     }
 
+    LaunchedEffect(previewMode, snapshot?.phase) {
+        if (!previewMode || snapshot?.phase != "race") return@LaunchedEffect
+        var lastJumpSequence = controls.value.jumpSequence
+        var jumpStartedAt = 0L
+        var previousFrameAt = SystemClock.elapsedRealtime()
+        var forwardVelocity = 0f
+        var lateralVelocity = 0f
+        while (true) {
+            val input = controls.value
+            val now = SystemClock.elapsedRealtime()
+            val deltaSeconds = ((now - previousFrameAt) / 1_000f).coerceIn(0f, .05f)
+            previousFrameAt = now
+            if (input.jumpSequence > lastJumpSequence) {
+                lastJumpSequence = input.jumpSequence
+                jumpStartedAt = now
+            }
+            val jumpAgeSeconds = if (jumpStartedAt == 0L) Float.POSITIVE_INFINITY else (now - jumpStartedAt) / 1_000f
+            val jumping = jumpAgeSeconds in 0f..1.28f
+            val jumpHeight = if (jumping) (16f * jumpAgeSeconds - 12.5f * jumpAgeSeconds * jumpAgeSeconds).coerceAtLeast(0f) else 0f
+            val accelerationScale = if (input.bracing) .55f else 1f
+            forwardVelocity += input.move * 30f * accelerationScale * deltaSeconds
+            if (abs(input.move) < .04f) forwardVelocity *= (1f - 8f * deltaSeconds).coerceAtLeast(0f)
+            forwardVelocity = forwardVelocity.coerceIn(-5.4f, 12f)
+            lateralVelocity += input.steer * 20f * deltaSeconds
+            if (abs(input.steer) < .04f) lateralVelocity *= (1f - 9f * deltaSeconds).coerceAtLeast(0f)
+            lateralVelocity = lateralVelocity.coerceIn(-2.6f, 2.6f)
+            snapshot = snapshot?.let { current ->
+                fun advance(team: RopeboundTeam): RopeboundTeam {
+                    val updated = team.players.map { player ->
+                        if (player.id != identity) player else player.copy(
+                            progress = (player.progress + forwardVelocity * deltaSeconds / 100f).coerceIn(0f, .98f),
+                            lateralOffset = (player.lateralOffset + lateralVelocity * deltaSeconds).coerceIn(-1.25f, 1.25f),
+                            height = jumpHeight,
+                            velocity = kotlin.math.hypot(forwardVelocity, lateralVelocity),
+                            grounded = !jumping,
+                            jumping = jumping,
+                            bracing = input.bracing,
+                        )
+                    }
+                    return team.copy(
+                        players = updated,
+                        progress = updated.map { it.progress }.average().toFloat(),
+                        ropeTension = if (input.bracing) (team.ropeTension - .002f).coerceAtLeast(.04f)
+                        else (team.ropeTension + .0004f).coerceAtMost(.82f),
+                    )
+                }
+                if (current.viewerTeam == "B") current.copy(teamB = advance(current.teamB))
+                else current.copy(teamA = advance(current.teamA))
+            }
+            if (abs(input.move) > .12f || abs(input.steer) > .12f) gameAudio.startFootsteps() else gameAudio.stopFootsteps()
+            delay(33)
+        }
+    }
+
     fun exitGame() {
-        if (previewMode) {
-            gameAudio.stopAmbience()
-            onBack()
-            return
-        }
-        scope.launch {
-            gameAudio.stopAmbience()
-            withTimeoutOrNull(1_500) { runCatching { api.leave(roomCode, participantToken) } }
-            onBack()
-        }
+        // The parent owns the room-leave request. Returning immediately lets
+        // its landscape-to-portrait crossfade begin without waiting on network.
+        gameAudio.stopAmbience()
+        onBack()
+    }
+
+    fun updateLocalPreview(transform: (RopeboundSnapshot) -> RopeboundSnapshot) {
+        if (previewMode) snapshot = snapshot?.let(transform)
     }
 
     val state = snapshot
@@ -394,8 +475,13 @@ internal fun RopeboundGameScreen(
         ropeTensionWasHigh = isHigh
     }
 
-    Surface(color = MaterialTheme.colorScheme.background) {
-        if (state?.phase == "race") {
+    Surface(color = Color(0xFF101820)) {
+        Crossfade(
+            targetState = state?.phase,
+            animationSpec = tween(durationMillis = 480),
+            label = "lobby-playground-transition",
+        ) { displayedPhase ->
+        if (displayedPhase == "race" && state != null) {
             RaceContent(
                 modifier = Modifier.fillMaxSize(),
                 state = state,
@@ -407,14 +493,87 @@ internal fun RopeboundGameScreen(
                 onOpenGameSettings = ::openGameSettings,
                 onExit = ::exitGame,
                 viewerSpectating = state.viewerSpectating,
-                onMove = ::setMove,
-                onJump = {
-                    gameAudio.play(RopeboundGameAudio.Cue.JUMP)
-                    jump()
-                },
+                onStick = ::setStick,
+                hudOpacity = hudOpacity,
+                hudEditMode = hudEditMode,
+                joystickPosition = joystickPosition,
+                jumpPosition = jumpPosition,
+                onJoystickPositionChange = { joystickPosition = it },
+                onJumpPositionChange = { jumpPosition = it },
+                onExitHudEdit = { hudEditMode = false },
+                onJump = ::jump,
                 onBrace = ::setBrace,
                 previewMode = previewMode,
             )
+        } else if (displayedPhase == "lobby" && state != null) {
+            val lobbyStageTeam = state.teamA.copy(
+                count = state.teamA.count + state.teamB.count,
+                players = state.teamA.players + state.teamB.players,
+            )
+            Box(Modifier.fillMaxSize()) {
+                Ropebound3DScene(
+                    team = lobbyStageTeam,
+                    viewerIdentity = identity,
+                    obstacles = state.obstacles,
+                    cameraBlend = .42f,
+                    showPlayerNameplates = false,
+                    modifier = Modifier.fillMaxSize(),
+                    onReady = {},
+                )
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xAA0D1722),
+                                Color(0x82111C28),
+                                Color(0xD90A141B),
+                            ),
+                        ),
+                    ),
+                )
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    LobbyHeader(
+                        microphoneEnabled = microphoneEnabled,
+                        busy = busy,
+                        isHost = state.isHost,
+                        freeTeamSwitching = state.freeTeamSwitching,
+                        onOpenSettings = ::openGameSettings,
+                        onToggleMicrophone = onToggleMicrophone,
+                        onSetFreeTeamSwitching = { enabled ->
+                            if (previewMode) updateLocalPreview { it.copy(freeTeamSwitching = enabled) }
+                            else action { api.setFreeTeamSwitching(roomCode, participantToken, enabled) }
+                        },
+                        onExit = ::exitGame,
+                    )
+                    LobbyContent(
+                        modifier = Modifier.weight(1f),
+                        state = state,
+                        busy = busy,
+                        error = error,
+                        ready = ownPlayer?.ready ?: false,
+                        viewerIdentity = identity,
+                        onChooseTeam = { team ->
+                            if (previewMode) updateLocalPreview { movePreviewPlayer(it, identity, team) }
+                            else action { api.chooseTeam(roomCode, participantToken, team) }
+                        },
+                        onSwapPlayers = { playerId, otherPlayerId ->
+                            if (previewMode) updateLocalPreview { swapPreviewPlayers(it, playerId, otherPlayerId) }
+                            else action { api.swapPlayers(roomCode, participantToken, playerId, otherPlayerId) }
+                        },
+                        onReady = { ready ->
+                            if (previewMode) updateLocalPreview { setPreviewReady(it, identity, ready) }
+                            else action { api.setReady(roomCode, participantToken, ready) }
+                        },
+                        onStart = {
+                            if (previewMode) updateLocalPreview { localPreviewSnapshot() }
+                            else action { api.start(roomCode, participantToken) }
+                        },
+                    )
+                }
+            }
         } else {
             Column(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -432,23 +591,6 @@ internal fun RopeboundGameScreen(
 
                 when {
                     state == null -> LoadingLobby(error) { reconnectAttempt += 1 }
-                    state.phase == "lobby" -> LobbyContent(
-                        modifier = Modifier.weight(1f),
-                        state = state,
-                        busy = busy,
-                        error = error,
-                        ready = ownPlayer?.ready ?: false,
-                        viewerIdentity = identity,
-                        onChooseTeam = { team -> action { api.chooseTeam(roomCode, participantToken, team) } },
-                        onSetFreeTeamSwitching = { enabled ->
-                            action { api.setFreeTeamSwitching(roomCode, participantToken, enabled) }
-                        },
-                        onSwapPlayers = { playerId, otherPlayerId ->
-                            action { api.swapPlayers(roomCode, participantToken, playerId, otherPlayerId) }
-                        },
-                        onReady = { ready -> action { api.setReady(roomCode, participantToken, ready) } },
-                        onStart = { action { api.start(roomCode, participantToken) } },
-                    )
                     else -> ResultContent(
                         state = state,
                         busy = busy,
@@ -464,11 +606,14 @@ internal fun RopeboundGameScreen(
                 )
             }
         }
+        }
         if (gameSettingsOpen) {
-            GameAudioSettingsOverlay(
+            GameSettingsOverlay(
                 soundEnabled = soundEnabled,
                 ambienceVolume = ambienceVolume,
                 sfxVolume = sfxVolume,
+                hudOpacity = hudOpacity,
+                hudEditMode = hudEditMode,
                 onSoundEnabledChange = { soundEnabled = gameAudio.setEnabled(it) },
                 onAmbienceVolumeChange = {
                     ambienceVolume = it
@@ -477,6 +622,13 @@ internal fun RopeboundGameScreen(
                 onSfxVolumeChange = {
                     sfxVolume = it
                     gameAudio.setSfxVolume(it)
+                },
+                onHudOpacityChange = { hudOpacity = it.coerceIn(.35f, 1f) },
+                onHudEditModeChange = { hudEditMode = it },
+                onResetHud = {
+                    hudOpacity = .88f
+                    joystickPosition = Offset(.025f, .67f)
+                    jumpPosition = Offset(.78f, .78f)
                 },
                 onReset = {
                     ambienceVolume = 0.08f
@@ -491,7 +643,7 @@ internal fun RopeboundGameScreen(
 }
 
 private fun localPreviewSnapshot(): RopeboundSnapshot {
-    val names = listOf("Alok", "Mina", "Jax", "Oli")
+    val names = listOf("Alex", "Jordan", "Sam", "Morgan")
     val players = names.mapIndexed { index, name ->
         RopeboundPlayer(
             id = "preview${index + 1}",
@@ -504,7 +656,7 @@ private fun localPreviewSnapshot(): RopeboundSnapshot {
             jumping = false,
             bracing = false,
             host = index == 0,
-            pingMs = listOf(42, 58, 37, 64)[index],
+            pingMs = listOf(32, 45, 38, 52)[index],
         )
     }
     val ownTeam = RopeboundTeam(
@@ -549,6 +701,59 @@ private fun localPreviewSnapshot(): RopeboundSnapshot {
     )
 }
 
+private fun localPreviewLobbySnapshot(): RopeboundSnapshot {
+    val race = localPreviewSnapshot()
+    val demoPlayers = race.teamA.players
+    val teamAPlayers = demoPlayers.take(2)
+    val teamBPlayers = demoPlayers.drop(2)
+    return race.copy(
+        phase = "lobby",
+        teamA = race.teamA.copy(count = teamAPlayers.size, players = teamAPlayers),
+        teamB = race.teamB.copy(count = teamBPlayers.size, players = teamBPlayers),
+        viewerTeam = "A",
+        freeTeamSwitching = true,
+        notice = "Local preview · team changes are simulated",
+    )
+}
+
+private fun movePreviewPlayer(state: RopeboundSnapshot, playerId: String, targetTeam: String): RopeboundSnapshot {
+    if (targetTeam != "A" && targetTeam != "B") return state
+    val inA = state.teamA.players.firstOrNull { it.id == playerId }
+    val inB = state.teamB.players.firstOrNull { it.id == playerId }
+    if (inA != null && targetTeam == "B") return state.copy(
+        teamA = state.teamA.copy(count = (state.teamA.count - 1).coerceAtLeast(0), players = state.teamA.players - inA),
+        teamB = state.teamB.copy(count = state.teamB.count + 1, players = state.teamB.players + inA),
+        viewerTeam = targetTeam,
+    )
+    if (inB != null && targetTeam == "A") return state.copy(
+        teamB = state.teamB.copy(count = (state.teamB.count - 1).coerceAtLeast(0), players = state.teamB.players - inB),
+        teamA = state.teamA.copy(count = state.teamA.count + 1, players = state.teamA.players + inB),
+        viewerTeam = targetTeam,
+    )
+    return state
+}
+
+private fun swapPreviewPlayers(state: RopeboundSnapshot, playerId: String, otherPlayerId: String): RopeboundSnapshot {
+    val playerA = state.teamA.players.firstOrNull { it.id == playerId }
+    val playerB = state.teamB.players.firstOrNull { it.id == playerId }
+    val otherA = state.teamA.players.firstOrNull { it.id == otherPlayerId }
+    val otherB = state.teamB.players.firstOrNull { it.id == otherPlayerId }
+    if (playerA != null && otherB != null) return state.copy(
+        teamA = state.teamA.copy(players = state.teamA.players.map { if (it.id == playerId) otherB else it }),
+        teamB = state.teamB.copy(players = state.teamB.players.map { if (it.id == otherPlayerId) playerA else it }),
+    )
+    if (playerB != null && otherA != null) return state.copy(
+        teamB = state.teamB.copy(players = state.teamB.players.map { if (it.id == playerId) otherA else it }),
+        teamA = state.teamA.copy(players = state.teamA.players.map { if (it.id == otherPlayerId) playerB else it }),
+    )
+    return state
+}
+
+private fun setPreviewReady(state: RopeboundSnapshot, playerId: String, ready: Boolean): RopeboundSnapshot = state.copy(
+    teamA = state.teamA.copy(players = state.teamA.players.map { if (it.id == playerId) it.copy(ready = ready) else it }),
+    teamB = state.teamB.copy(players = state.teamB.players.map { if (it.id == playerId) it.copy(ready = ready) else it }),
+)
+
 @Composable
 private fun LoadingLobby(error: String?, onRetry: () -> Unit) {
     Column(
@@ -577,6 +782,101 @@ private fun LoadingLobby(error: String?, onRetry: () -> Unit) {
 }
 
 @Composable
+private fun LobbyHeader(
+    microphoneEnabled: Boolean,
+    busy: Boolean,
+    isHost: Boolean,
+    freeTeamSwitching: Boolean,
+    onOpenSettings: () -> Unit,
+    onToggleMicrophone: () -> Unit,
+    onSetFreeTeamSwitching: (Boolean) -> Unit,
+    onExit: () -> Unit,
+) {
+    val mint = Color(0xFF59E8D0)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .background(Color(0xD91A2835), RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0x6648B9C8), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("ROPEBOUND · 3D", color = mint, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = .5.sp)
+            Box(Modifier.width(1.dp).height(20.dp).background(Color.White.copy(alpha = .24f)))
+            Text("Game lobby", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = Color(0xAA15232E),
+            border = BorderStroke(1.dp, Color(0x775A7180)),
+        ) {
+            Row(
+                modifier = Modifier.height(34.dp).padding(start = 9.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "Free switch",
+                    color = if (freeTeamSwitching) mint else Color(0xFFD0DEE6),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                if (isHost) {
+                    Switch(
+                        checked = freeTeamSwitching,
+                        onCheckedChange = onSetFreeTeamSwitching,
+                        enabled = !busy,
+                        modifier = Modifier.graphicsLayer { scaleX = .58f; scaleY = .58f },
+                    )
+                } else {
+                    Text(
+                        if (freeTeamSwitching) "ON" else "HOST",
+                        color = if (freeTeamSwitching) mint else Color(0xFFB9C7D0),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = onToggleMicrophone,
+            modifier = Modifier.height(34.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 9.dp),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xAA15232E), contentColor = Color.White),
+            border = BorderStroke(1.dp, Color(0x775A7180)),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text(if (microphoneEnabled) "Mic on" else "Mic off", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                Box(
+                    Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(
+                        if (microphoneEnabled) Color(0xFF58F0A5) else Color(0xFF87939C),
+                    ),
+                )
+            }
+        }
+        GameSettingsButton(onClick = onOpenSettings, modifier = Modifier.size(36.dp))
+        OutlinedButton(
+            onClick = onExit,
+            enabled = !busy,
+            modifier = Modifier.height(34.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xAA15232E), contentColor = Color.White),
+            border = BorderStroke(1.dp, Color(0x775A7180)),
+        ) {
+            Text("Back to voice", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
 private fun LobbyContent(
     modifier: Modifier = Modifier,
     state: RopeboundSnapshot,
@@ -585,23 +885,33 @@ private fun LobbyContent(
     ready: Boolean,
     viewerIdentity: String,
     onChooseTeam: (String) -> Unit,
-    onSetFreeTeamSwitching: (Boolean) -> Unit,
     onSwapPlayers: (String, String) -> Unit,
     onReady: (Boolean) -> Unit,
     onStart: () -> Unit,
 ) {
     var swapSelection by remember { mutableStateOf<Pair<String, RopeboundPlayer>?>(null) }
-    Column(modifier = modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val teamsReady = state.teamA.count >= 2 && state.teamB.count >= 2
-        val everyoneReady = teamsReady && state.teamA.players.all { it.ready } && state.teamB.players.all { it.ready }
-        val currentTeamCount = when (state.viewerTeam) {
-            "A" -> state.teamA.count
-            "B" -> state.teamB.count
-            else -> 0
-        }
-        val switchingAllowed = state.isHost || state.freeTeamSwitching
-        Text("At least two runners are needed on each team. Swap players to keep both teams balanced.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+    val mint = Color(0xFF59E8D0)
+    val teamsReady = state.teamA.count >= 2 && state.teamB.count >= 2
+    val everyoneReady = teamsReady && state.teamA.players.all { it.ready } && state.teamB.players.all { it.ready }
+    val currentTeamCount = when (state.viewerTeam) {
+        "A" -> state.teamA.count
+        "B" -> state.teamB.count
+        else -> 0
+    }
+    val switchingAllowed = state.isHost || state.freeTeamSwitching
+
+    Column(modifier = modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "At least two runners on each team · Swap players to keep both teams balanced.",
+            modifier = Modifier.fillMaxWidth(),
+            color = Color(0xFFD0DEE6),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(180.dp)) {
             TeamCard(
                 title = "TEAM A",
                 teamId = "A",
@@ -635,41 +945,55 @@ private fun LobbyContent(
                 modifier = Modifier.weight(1f),
             )
         }
-        if (state.isHost) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Allow free team switching", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Players can swap with someone on the other team.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(
-                    checked = state.freeTeamSwitching,
-                    onCheckedChange = onSetFreeTeamSwitching,
-                    enabled = !busy,
-                )
-            }
-        } else if (state.freeTeamSwitching) {
-            Text("Free team switching is on. Tap Swap beside your name to switch.", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        if (state.notice.isNotBlank() || error != null) {
+            Text(
+                error ?: state.notice,
+                modifier = Modifier.fillMaxWidth(),
+                color = if (error != null) Color(0xFFFFB4B4) else Color(0xFFD0DEE6),
+                fontSize = 9.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Text(state.notice, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
                 onClick = { onReady(!ready) },
-                modifier = Modifier.weight(1f).height(50.dp),
+                modifier = Modifier.weight(1f).height(42.dp),
                 enabled = !busy && state.viewerTeam != null,
-            ) { Text(if (ready) "Not ready" else "Ready up") }
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color(0xC619302F),
+                    contentColor = Color(0xFF70F0B7),
+                    disabledContentColor = Color(0xFF78958B),
+                ),
+                border = BorderStroke(1.dp, Color(0xAA5ADFAE)),
+            ) {
+                Text(if (ready) "✓ Ready · tap to undo" else "✓ Ready up", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
             Button(
                 onClick = onStart,
-                modifier = Modifier.weight(1f).height(50.dp),
+                modifier = Modifier.weight(1f).height(42.dp),
                 enabled = !busy && state.isHost && everyoneReady,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF5BEBC0),
+                    contentColor = Color(0xFF06211E),
+                    disabledContainerColor = Color(0xFF35544F),
+                    disabledContentColor = Color(0xFFA6C0BA),
+                ),
             ) {
                 Text(
                     when {
-                        !state.isHost -> "Host starts"
+                        !state.isHost -> "Host starts race"
                         !teamsReady -> "Need 2 per team"
                         !everyoneReady -> "Waiting for ready"
                         else -> "Start race"
                     },
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -723,68 +1047,99 @@ private fun TeamCard(
     onRequestSwap: (RopeboundPlayer) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val teamAccent = if (teamId == "A") Color(0xFF59E8D0) else Color(0xFFB1C1CE)
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (selected) Color(0xE3223A47) else Color(0xD8192934),
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) teamAccent else Color(0x77788A98),
+        ),
+        shadowElevation = if (selected) 10.dp else 4.dp,
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            Text("$title · ${team.count}/5", fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth().height(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(title, color = teamAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text(" · ${team.count}/5", color = Color(0xFFD2DEE5), fontSize = 10.sp)
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(teamAccent.copy(alpha = if (selected) .52f else .22f)))
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (team.players.isEmpty() && team.spectators.isEmpty()) {
-                    Text("Open team", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text(
+                        "Waiting for runners…",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        color = Color(0xFFBCC9D1),
+                        fontSize = 9.sp,
+                    )
                 }
                 team.players.forEach { player ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val statusPrefix = when {
-                            !player.online -> "◌ "
-                            player.ready -> "✓ "
-                            else -> "○ "
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(27.dp)
+                            .background(Color(0x99202C37), RoundedCornerShape(9.dp))
+                            .border(1.dp, Color(0x557A8A98), RoundedCornerShape(9.dp))
+                            .padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        val statusIcon = when {
+                            !player.online -> "◌"
+                            player.ready -> "✓"
+                            else -> "○"
                         }
+                        Text(
+                            statusIcon,
+                            color = if (player.online) Color(0xFF70F0B7) else Color(0xFFFFD166),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                         val statusSuffix = when {
                             !player.online -> " · connecting…"
                             player.host -> " · host"
                             else -> ""
                         }
                         Text(
-                            "$statusPrefix${player.name}$statusSuffix",
+                            "${player.name}$statusSuffix",
                             modifier = Modifier.weight(1f),
-                            fontSize = 12.sp,
-                            color = if (player.online) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            color = if (player.online) Color.White else Color.White.copy(alpha = .58f),
+                            fontSize = 9.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         PingBadge(player.pingMs)
                         if (isHost || (freeTeamSwitching && viewerTeam == teamId && player.id == viewerIdentity)) {
-                            Text(
-                                "Swap",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
+                            Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .height(23.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Brush.linearGradient(listOf(Color(0xFF9B64E8), Color(0xFF39C8D8))))
                                     .clickable(enabled = !busy && player.online) { onRequestSwap(player) }
-                                    .padding(horizontal = 4.dp, vertical = 3.dp),
-                            )
+                                    .padding(horizontal = 7.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("Swap", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
                 team.spectators.forEach { spectator ->
                     Text(
-                        "◦ $spectator",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "◦ $spectator · spectator",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 8.sp,
+                        color = Color(0xFFB9C7D0),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -793,17 +1148,25 @@ private fun TeamCard(
             OutlinedButton(
                 onClick = { onChooseTeam(teamId) },
                 enabled = canJoin && !selected && team.count < 5,
-                modifier = Modifier.fillMaxWidth().height(36.dp),
+                modifier = Modifier.fillMaxWidth().height(27.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color(0x55202E39),
+                    contentColor = Color.White,
+                    disabledContentColor = if (selected) teamAccent else Color(0xFFAAB9C2),
+                ),
+                border = BorderStroke(1.dp, Color(0x777E929E)),
             ) {
                 Text(
                     when {
                         selected -> "Your team"
-                        team.count >= 5 -> "Full"
+                        team.count >= 5 -> "Team full"
                         canJoin -> "Join team"
                         !isHost && !freeTeamSwitching -> "Ask host"
                         else -> "Need 3 on your team"
                     },
-                    fontSize = 11.sp,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
@@ -814,16 +1177,16 @@ private fun TeamCard(
 private fun PingBadge(pingMs: Int?) {
     val color = when {
         pingMs == null -> Color(0xFFB7CACE)
-        pingMs < 150 -> Color(0xFF77E0B5)
+        pingMs < 150 -> Color(0xFF71EBA2)
         pingMs < 300 -> Color(0xFFFFD166)
         else -> Color(0xFFFF8585)
     }
-    Surface(color = color.copy(alpha = .16f), shape = RoundedCornerShape(50)) {
+    Surface(color = color.copy(alpha = .2f), shape = RoundedCornerShape(50)) {
         Text(
             pingMs?.let { "$it ms" } ?: "PING —",
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
             color = color,
-            fontSize = 9.sp,
+            fontSize = 8.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -842,13 +1205,21 @@ private fun RaceContent(
     onToggleMicrophone: () -> Unit,
     onOpenGameSettings: () -> Unit,
     onExit: () -> Unit,
-    onMove: (Int, Boolean) -> Unit,
+    onStick: (Float, Float) -> Unit,
     onJump: () -> Unit,
     onBrace: (Boolean) -> Unit,
+    hudOpacity: Float,
+    hudEditMode: Boolean,
+    joystickPosition: Offset,
+    jumpPosition: Offset,
+    onJoystickPositionChange: (Offset) -> Unit,
+    onJumpPositionChange: (Offset) -> Unit,
+    onExitHudEdit: () -> Unit,
     previewMode: Boolean,
 ) {
     val ownTeam = if (state.viewerTeam == "A") state.teamA else state.teamB
     val otherTeam = if (state.viewerTeam == "A") state.teamB else state.teamA
+    val latestJumpPosition by rememberUpdatedState(jumpPosition)
     var playgroundReady by remember { mutableStateOf(false) }
     var minimumLoadingTimeComplete by remember { mutableStateOf(false) }
     var splashVisible by remember { mutableStateOf(true) }
@@ -899,42 +1270,44 @@ private fun RaceContent(
 
         if (gameUiVisible) {
         Row(
-            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
+                .graphicsLayer { alpha = hudOpacity },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Row(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
                     .background(Color(0xE6102630), RoundedCornerShape(18.dp))
                     .border(1.dp, Color(0xFF20C7D3).copy(alpha = .65f), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RaceMarker("TEAM", ownTeam.progress, Modifier.weight(1f), valueColor = Color(0xFF18D9EA))
+                RaceMarker("TEAM", ownTeam.progress, valueColor = Color(0xFF18D9EA))
                 HudStatDivider()
-                RaceMarker("RIVALS", otherTeam.progress, Modifier.weight(1f), valueColor = Color(0xFFFF6688))
+                RaceMarker("RIVALS", otherTeam.progress, valueColor = Color(0xFFFF6688))
                 HudStatDivider()
-                RaceMarker("TENSION", ownTeam.ropeTension, Modifier.weight(1f), valueColor = Color(0xFFFFD34E), isTension = true)
+                RaceMarker("TENSION", ownTeam.ropeTension, valueColor = Color(0xFFFFD34E), isTension = true)
             }
-            HudActionButton(GameHudIcon.Follow, "FOLLOW", selected = !topDownCamera, modifier = Modifier.width(82.dp)) {
+            Spacer(Modifier.weight(1f))
+            HudActionButton(GameHudIcon.Follow, null, selected = !topDownCamera, modifier = Modifier.size(38.dp), description = "Follow camera") {
                 topDownCamera = false
             }
-            HudActionButton(GameHudIcon.TopView, "TOP", selected = topDownCamera, modifier = Modifier.width(62.dp)) {
+            HudActionButton(GameHudIcon.TopView, null, selected = topDownCamera, modifier = Modifier.size(38.dp), description = "Top camera") {
                 topDownCamera = true
             }
-            HudActionButton(GameHudIcon.Settings, null, modifier = Modifier.width(42.dp), description = "Game settings", onClick = onOpenGameSettings)
+            HudActionButton(GameHudIcon.Settings, null, modifier = Modifier.size(38.dp), description = "Game settings", onClick = onOpenGameSettings)
             HudActionButton(
                 icon = GameHudIcon.Microphone,
-                label = if (microphoneEnabled) "Mic on" else "Mic off",
-                modifier = Modifier.width(70.dp),
+                label = null,
+                modifier = Modifier.size(38.dp),
                 description = if (microphoneEnabled) "Mute microphone" else "Unmute microphone",
                 onClick = onToggleMicrophone,
             )
             HudActionButton(
                 icon = GameHudIcon.Voice,
-                label = "Voice",
-                modifier = Modifier.width(64.dp),
+                label = null,
+                modifier = Modifier.size(38.dp),
                 description = "Back to voice room",
                 onClick = onExit,
             )
@@ -992,25 +1365,73 @@ private fun RaceContent(
         } else {
             // Compact controls retain 56dp touch targets while taking less screen space.
             val bottomPadding = if (isLandscape) 10.dp else 8.dp
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = bottomPadding),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                HoldMoveButton(-1, topDownCamera, Modifier.size(56.dp), onMove)
-                HoldMoveButton(1, topDownCamera, Modifier.size(56.dp), onMove)
-                Spacer(Modifier.weight(1f))
+            val density = LocalDensity.current
+            val stickSize = 112.dp
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val screenWidthPx = with(density) { maxWidth.toPx() }
+                val screenHeightPx = with(density) { maxHeight.toPx() }
+                VirtualJoystick(
+                    move = 0f,
+                    steer = 0f,
+                    position = joystickPosition,
+                    opacity = hudOpacity,
+                    editing = hudEditMode,
+                    maxWidthPx = screenWidthPx,
+                    maxHeightPx = screenHeightPx,
+                    controlSize = stickSize,
+                    modifier = Modifier.offset {
+                        val stickPx = with(density) { stickSize.toPx() }
+                        IntOffset(
+                            (screenWidthPx * joystickPosition.x).roundToInt().coerceIn(0, (screenWidthPx - stickPx).roundToInt().coerceAtLeast(0)),
+                            (screenHeightPx * joystickPosition.y).roundToInt().coerceIn(0, (screenHeightPx - stickPx).roundToInt().coerceAtLeast(0)),
+                        )
+                    },
+                    onPositionChange = onJoystickPositionChange,
+                    onInput = onStick,
+                )
                 GameActionButton(
-                    onClick = onJump,
-                    description = "Jump",
+                    onClick = { if (!hudEditMode) onJump() },
+                    description = if (hudEditMode) "Drag to move jump control" else "Jump",
                     icon = GameControlIcon.Jump,
-                    modifier = Modifier.size(56.dp),
+                    modifier = Modifier.offset {
+                        val buttonPx = with(density) { 56.dp.toPx() }
+                        IntOffset(
+                            (screenWidthPx * jumpPosition.x).roundToInt().coerceIn(0, (screenWidthPx - buttonPx).roundToInt().coerceAtLeast(0)),
+                            (screenHeightPx * jumpPosition.y).roundToInt().coerceIn(0, (screenHeightPx - buttonPx).roundToInt().coerceAtLeast(0)),
+                        )
+                    }.size(56.dp)
+                        .graphicsLayer { alpha = hudOpacity }
+                        .pointerInput(hudEditMode, screenWidthPx, screenHeightPx) {
+                            if (hudEditMode) {
+                                var dragPosition = latestJumpPosition
+                                detectDragGestures(onDragStart = { dragPosition = latestJumpPosition }) { change, drag ->
+                                    change.consume()
+                                    val sizePx = with(density) { 56.dp.toPx() }
+                                    dragPosition = Offset(
+                                        (dragPosition.x + drag.x / screenWidthPx).coerceIn(0f, (screenWidthPx - sizePx) / screenWidthPx),
+                                        (dragPosition.y + drag.y / screenHeightPx).coerceIn(0f, (screenHeightPx - sizePx) / screenHeightPx),
+                                    )
+                                    onJumpPositionChange(dragPosition)
+                                }
+                            }
+                        },
                     highlighted = true,
                 )
-                HoldBraceButton(onBrace, Modifier.size(56.dp))
+                HoldBraceButton(
+                    onBrace,
+                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottomPadding).size(56.dp)
+                        .graphicsLayer { alpha = hudOpacity },
+                )
+                if (hudEditMode) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp).clickable(onClick = onExitHudEdit),
+                        shape = RoundedCornerShape(50),
+                        color = Color(0xE6102630),
+                        border = BorderStroke(1.dp, Color(0xFF66E0CB)),
+                    ) {
+                        Text("HUD EDIT · drag controls · DONE", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
         }
@@ -1036,18 +1457,155 @@ private fun GameSettingsButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier.semantics {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xCC10212A))
+            .border(1.dp, Color.White.copy(alpha = .6f), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .semantics {
             contentDescription = "Game audio settings"
         },
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = Color(0xCC10212A),
-            contentColor = Color.White,
-        ),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = .6f)),
+        contentAlignment = Alignment.Center,
     ) {
-        Text("⚙", fontSize = 18.sp)
+        Canvas(Modifier.size(18.dp)) {
+            val color = Color.White
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val stroke = 1.8.dp.toPx()
+            drawCircle(color, 5.dp.toPx(), Offset(cx, cy), style = Stroke(stroke))
+            drawCircle(color, 1.4.dp.toPx(), Offset(cx, cy))
+            repeat(8) { index ->
+                val angle = index * PI / 4
+                drawLine(
+                    color,
+                    Offset(cx + cos(angle).toFloat() * 6.dp.toPx(), cy + sin(angle).toFloat() * 6.dp.toPx()),
+                    Offset(cx + cos(angle).toFloat() * 8.dp.toPx(), cy + sin(angle).toFloat() * 8.dp.toPx()),
+                    stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VirtualJoystick(
+    move: Float,
+    steer: Float,
+    position: Offset,
+    opacity: Float,
+    editing: Boolean,
+    maxWidthPx: Float,
+    maxHeightPx: Float,
+    controlSize: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    onPositionChange: (Offset) -> Unit,
+    onInput: (Float, Float) -> Unit,
+) {
+    val density = LocalDensity.current
+    val latestPosition by rememberUpdatedState(position)
+    var activeMove by remember { mutableStateOf(move) }
+    var activeSteer by remember { mutableStateOf(steer) }
+    val sizePx = with(density) { controlSize.toPx() }
+
+    Canvas(
+        modifier = modifier.size(controlSize)
+            .graphicsLayer { alpha = opacity }
+            .semantics { contentDescription = if (editing) "Drag to move joystick" else "Four direction movement joystick" }
+            .pointerInput(editing, maxWidthPx, maxHeightPx, sizePx) {
+                fun updateAxes(position: Offset) {
+                    val center = sizePx / 2f
+                    val travel = sizePx * .28f
+                    val rawX = (position.x - center) / travel
+                    val rawY = (position.y - center) / travel
+                    val rawMagnitude = kotlin.math.hypot(rawX, rawY)
+                    val deadZone = .14f
+                    val inputScale = if (rawMagnitude <= deadZone || rawMagnitude == 0f) {
+                        0f
+                    } else {
+                        ((rawMagnitude.coerceAtMost(1f) - deadZone) / (1f - deadZone)) / rawMagnitude
+                    }
+                    val horizontal = (rawX * inputScale).coerceIn(-1f, 1f)
+                    val vertical = (rawY * inputScale).coerceIn(-1f, 1f)
+                    activeMove = -vertical
+                    activeSteer = horizontal
+                    onInput(-vertical, horizontal)
+                }
+                if (editing) {
+                    var dragPosition = latestPosition
+                    detectDragGestures(onDragStart = { dragPosition = latestPosition }) { change, drag ->
+                        change.consume()
+                        val maxX = ((maxWidthPx - sizePx) / maxWidthPx).coerceAtLeast(0f)
+                        val maxY = ((maxHeightPx - sizePx) / maxHeightPx).coerceAtLeast(0f)
+                        dragPosition = Offset(
+                            (dragPosition.x + drag.x / maxWidthPx).coerceIn(0f, maxX),
+                            (dragPosition.y + drag.y / maxHeightPx).coerceIn(0f, maxY),
+                        )
+                        onPositionChange(dragPosition)
+                    }
+                } else {
+                    detectDragGestures(
+                        onDragStart = ::updateAxes,
+                        onDragEnd = {
+                            activeMove = 0f
+                            activeSteer = 0f
+                            onInput(0f, 0f)
+                        },
+                        onDragCancel = {
+                            activeMove = 0f
+                            activeSteer = 0f
+                            onInput(0f, 0f)
+                        },
+                    ) { change, _ ->
+                        change.consume()
+                        updateAxes(change.position)
+                    }
+                }
+            },
+    ) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension * .47f
+        drawCircle(
+            brush = Brush.radialGradient(
+                listOf(Color(0xF11B3038), Color(0xD90B171D)),
+                center = center,
+                radius = radius,
+            ),
+            radius = radius,
+            center = center,
+        )
+        drawCircle(Color(0xFFE2F4F4).copy(alpha = .78f), radius, center, style = Stroke(2.dp.toPx()))
+        drawCircle(Color(0xFF39D9D5).copy(alpha = .46f), radius * .72f, center, style = Stroke(1.dp.toPx()))
+
+        fun arrow(dx: Float, dy: Float) {
+            val point = Offset(center.x + dx * radius * .48f, center.y + dy * radius * .48f)
+            val ux = dx
+            val uy = dy
+            val px = -dy
+            val py = dx
+            val tip = Offset(point.x + ux * radius * .105f, point.y + uy * radius * .105f)
+            val tail = Offset(point.x - ux * radius * .105f, point.y - uy * radius * .105f)
+            val ink = Color.White.copy(alpha = .78f)
+            drawLine(ink, tail, tip, 2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - ux * radius * .08f + px * radius * .065f, tip.y - uy * radius * .08f + py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - ux * radius * .08f - px * radius * .065f, tip.y - uy * radius * .08f - py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
+        }
+        arrow(0f, -1f)
+        arrow(0f, 1f)
+        arrow(-1f, 0f)
+        arrow(1f, 0f)
+
+        val knobTravel = radius * .66f
+        val knob = Offset(
+            center.x + activeSteer * knobTravel,
+            center.y - activeMove * knobTravel,
+        )
+        drawCircle(Color.Black.copy(alpha = .28f), radius * .30f, Offset(knob.x + 1.dp.toPx(), knob.y + 2.dp.toPx()))
+        drawCircle(Brush.verticalGradient(listOf(Color(0xFFC8E2E5), Color(0xFF677E87))), radius * .28f, knob)
+        drawCircle(Color.White.copy(alpha = .5f), radius * .28f, knob, style = Stroke(1.dp.toPx()))
+        drawCircle(Color.White.copy(alpha = .24f), radius * .10f, Offset(knob.x - radius * .08f, knob.y - radius * .08f))
     }
 }
 
@@ -1135,13 +1693,18 @@ private fun HudActionButton(
 }
 
 @Composable
-private fun GameAudioSettingsOverlay(
+private fun GameSettingsOverlay(
     soundEnabled: Boolean,
     ambienceVolume: Float,
     sfxVolume: Float,
+    hudOpacity: Float,
+    hudEditMode: Boolean,
     onSoundEnabledChange: (Boolean) -> Unit,
     onAmbienceVolumeChange: (Float) -> Unit,
     onSfxVolumeChange: (Float) -> Unit,
+    onHudOpacityChange: (Float) -> Unit,
+    onHudEditModeChange: (Boolean) -> Unit,
+    onResetHud: () -> Unit,
     onReset: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -1156,7 +1719,7 @@ private fun GameAudioSettingsOverlay(
             border = BorderStroke(1.dp, Color(0xFF66E0CB).copy(alpha = .75f)),
             shadowElevation = 16.dp,
         ) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp).verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("ROPEBOUND · IN GAME", color = Color(0xFF66E0CB), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
@@ -1200,6 +1763,20 @@ private fun GameAudioSettingsOverlay(
                     valueRange = 0f..1f,
                     colors = SliderDefaults.colors(thumbColor = Color(0xFF66E0CB), activeTrackColor = Color(0xFF66E0CB)),
                 )
+                Text("HUD transparency · ${(hudOpacity * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                Slider(
+                    value = hudOpacity,
+                    onValueChange = onHudOpacityChange,
+                    valueRange = .35f..1f,
+                    colors = SliderDefaults.colors(thumbColor = Color(0xFF66E0CB), activeTrackColor = Color(0xFF66E0CB)),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Customize HUD", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Move the joystick and jump icon after closing settings", color = Color(0xFFB7CACE), fontSize = 11.sp)
+                    }
+                    Switch(checked = hudEditMode, onCheckedChange = onHudEditModeChange)
+                }
                 Text(
                     "Voice chat stays connected. Your controls are released while settings are open.",
                     color = Color(0xFFB7CACE),
@@ -1211,7 +1788,10 @@ private fun GameAudioSettingsOverlay(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = onReset) { Text("Reset audio") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = onReset) { Text("Reset audio") }
+                        OutlinedButton(onClick = onResetHud) { Text("Reset HUD") }
+                    }
                     Button(
                         onClick = onClose,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66E0CB), contentColor = Color(0xFF082521)),
