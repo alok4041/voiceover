@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b12" />
+    <meta name="description" content="Learn how to play Ropebound 3D: lobby setup, movement controls, obstacles, rescues, checkpoints, and team rules." />
+    <title>Ropebound 3D Game Rules — SquadVoice</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #090b12;
+        color: #f4f5fa;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-width: 320px;
+        margin: 0;
+        background:
+          radial-gradient(ellipse at 50% -12%, rgba(114, 86, 255, .24), transparent 50%),
+          radial-gradient(ellipse at 100% 45%, rgba(45, 197, 155, .08), transparent 35%),
+          #090b12;
+      }
+      a { color: inherit; }
+      .shell { width: min(100% - 40px, 980px); margin: 0 auto; }
+      header { display: flex; align-items: center; justify-content: space-between; min-height: 82px; border-bottom: 1px solid rgba(255, 255, 255, .09); }
+      .brand { display: inline-flex; align-items: center; gap: 11px; font-size: 15px; font-weight: 800; letter-spacing: .12em; text-decoration: none; }
+      .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(178, 164, 255, .38); border-radius: 11px; background: rgba(137, 112, 255, .14); color: #c2b5ff; }
+      .brand-mark svg { width: 19px; height: 19px; }
+      .header-links { display: flex; align-items: center; gap: 20px; }
+      .header-note { color: #9da2b3; font-size: 13px; }
+      nav { display: flex; align-items: center; gap: 16px; }
+      nav a { color: #c9c5d8; font-size: 12px; font-weight: 650; text-decoration: none; }
+      nav a:hover, nav a[aria-current="page"] { color: #b8aaff; }
+      nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: 5px; }
+      main { padding: 58px 0 64px; }
+      .hero { max-width: 760px; margin: 0 auto 32px; text-align: center; }
+      .eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid rgba(177, 163, 255, .24); border-radius: 999px; background: rgba(130, 105, 255, .1); color: #c6bcff; font-size: 11px; font-weight: 750; letter-spacing: .06em; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #7ee7bf; box-shadow: 0 0 12px #7ee7bf; }
+      h1 { margin: 20px 0 14px; font-size: clamp(38px, 7vw, 60px); line-height: 1; letter-spacing: -.06em; }
+      h1 span { color: #b8aaff; }
+      .intro { max-width: 650px; margin: 0 auto; color: #b0b4c2; font-size: clamp(15px, 2.2vw, 18px); line-height: 1.65; }
+      .objective { margin: 28px auto 0; padding: 17px 20px; border: 1px solid rgba(126, 231, 191, .24); border-radius: 15px; background: rgba(126, 231, 191, .055); color: #d9efe8; font-size: 14px; line-height: 1.65; text-align: left; }
+      .objective strong { color: #8de8c3; }
+      .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0 44px; }
+      .stat, .panel, .control, .hazard { border: 1px solid rgba(255, 255, 255, .09); border-radius: 15px; background: rgba(255, 255, 255, .035); }
+      .stat { padding: 15px; text-align: center; }
+      .stat strong { display: block; color: #c6bcff; font-size: 21px; letter-spacing: -.03em; }
+      .stat span { display: block; margin-top: 4px; color: #969bab; font-size: 11px; line-height: 1.4; }
+      section { margin-top: 38px; }
+      h2 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
+      .section-intro { margin: 7px 0 16px; color: #969bab; font-size: 13px; line-height: 1.6; }
+      .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; }
+      .panel, .control, .hazard { padding: 17px; }
+      .step-number { display: grid; width: 27px; height: 27px; place-items: center; margin-bottom: 12px; border: 1px solid rgba(177, 163, 255, .34); border-radius: 50%; color: #c6bcff; font-size: 12px; font-weight: 750; }
+      .panel h3, .control h3, .hazard h3 { margin: 0 0 7px; font-size: 14px; }
+      .panel p, .control p, .hazard p { margin: 0; color: #aeb2bf; font-size: 12px; line-height: 1.6; }
+      .controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px; }
+      .control { display: flex; gap: 13px; align-items: flex-start; }
+      .icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 10px; background: rgba(177, 163, 255, .12); color: #c4b8ff; font-size: 16px; font-weight: 800; }
+      .control p strong { color: #d8d9e2; }
+      .hazards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 11px; }
+      .hazard { position: relative; overflow: hidden; }
+      .hazard-tag { display: inline-block; margin-bottom: 9px; padding: 4px 7px; border: 1px solid rgba(255, 209, 102, .2); border-radius: 999px; background: rgba(255, 209, 102, .07); color: #ffd166; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+      .hazard h3 { font-size: 13px; }
+      .rules-list { display: grid; gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+      .rules-list li { display: flex; gap: 10px; padding: 14px 15px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; background: rgba(255, 255, 255, .025); color: #aeb2bf; font-size: 12px; line-height: 1.6; }
+      .rules-list li::before { content: "•"; color: #8de8c3; font-size: 18px; line-height: 1; }
+      .callout { margin-top: 14px; padding: 15px 17px; border-left: 3px solid #b8aaff; border-radius: 0 11px 11px 0; background: rgba(183, 168, 255, .07); color: #b8bdca; font-size: 12px; line-height: 1.65; }
+      footer { padding: 22px 0 28px; border-top: 1px solid rgba(255, 255, 255, .08); color: #777c8c; font-size: 11px; text-align: center; }
+      footer a { color: #a9a0d8; text-decoration: none; }
+      @media (max-width: 700px) {
+        .steps { grid-template-columns: repeat(2, 1fr); }
+        .hazards { grid-template-columns: repeat(2, 1fr); }
+      }
+      @media (max-width: 640px) {
+        .shell { width: min(100% - 30px, 520px); }
+        header { min-height: 68px; }
+        .header-links { gap: 0; }
+        .header-note { display: none; }
+        nav { gap: 12px; }
+        nav a { font-size: 11px; }
+        main { padding: 42px 0 46px; }
+        .stats { gap: 8px; margin-bottom: 34px; }
+        .stat { padding: 12px 6px; }
+        .stat strong { font-size: 18px; }
+        .stat span { font-size: 10px; }
+        .steps, .controls, .hazards { grid-template-columns: 1fr; }
+        section { margin-top: 32px; }
+        h2 { font-size: 21px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <a class="brand" href="./" aria-label="SquadVoice home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3m-4 0h8"/></svg>
+          </span>
+          SQUADVOICE
+        </a>
+        <div class="header-links">
+          <span class="header-note">Android voice rooms</span>
+          <nav aria-label="Main navigation">
+            <a href="./">Home</a>
+            <a href="./rules.html" aria-current="page">Game Rules</a>
+          </nav>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="title">
+          <div class="eyebrow"><span class="dot" aria-hidden="true"></span> THE COURSE GUIDE</div>
+          <h1 id="title">Ropebound <span>3D</span></h1>
+          <p class="intro">A co-op obstacle race inside SquadVoice. Work with your team, stay connected by the rope, and get every runner across the finish.</p>
+          <div class="objective"><strong>Your objective:</strong> Help your whole team reach the finish before the rival team. The first runner alone does not win the race—your team must make it together.</div>
+        </section>
+
+        <div class="stats" aria-label="Game limits">
+          <div class="stat"><strong>2–5</strong><span>players on each team</span></div>
+          <div class="stat"><strong>10</strong><span>players maximum per lobby</span></div>
+          <div class="stat"><strong>3</strong><span>team rescues per race</span></div>
+        </div>
+
+        <section aria-labelledby="start-title">
+          <h2 id="start-title">How to start a race</h2>
+          <p class="section-intro">Open Ropebound from your SquadVoice room, then set up the lobby with your squad.</p>
+          <div class="steps">
+            <article class="panel"><span class="step-number">1</span><h3>Join a team</h3><p>Players are balanced between Team A and Team B. Each side needs at least two connected runners; a team can hold up to five.</p></article>
+            <article class="panel"><span class="step-number">2</span><h3>Balance the lobby</h3><p>The host can swap players. The host may allow free team switching; teams cannot be changed after the race begins.</p></article>
+            <article class="panel"><span class="step-number">3</span><h3>Ready up</h3><p>Every runner must tap <strong>Ready up</strong>. If a team changes, affected players need to ready up again.</p></article>
+            <article class="panel"><span class="step-number">4</span><h3>Host starts</h3><p>When both teams have at least two connected players and everyone is ready, the host can tap <strong>Start race</strong>.</p></article>
+          </div>
+        </section>
+
+        <section aria-labelledby="controls-title">
+          <h2 id="controls-title">Controls</h2>
+          <p class="section-intro">Use the on-screen controls while the race is in landscape mode.</p>
+          <div class="controls">
+            <article class="control"><span class="icon" aria-hidden="true">✣</span><div><h3>Four-way movement stick</h3><p><strong>Push up</strong> to run forward, <strong>down</strong> to slow or move back, and <strong>left/right</strong> to steer across the course. Ease the stick back to center to stop steering.</p></div></article>
+            <article class="control"><span class="icon" aria-hidden="true">↑</span><div><h3>Jump</h3><p>Tap Jump to leap while grounded. Time it for pits, boulders, river gaps, and lava. A jump already in the air cannot be triggered again.</p></div></article>
+            <article class="control"><span class="icon" aria-hidden="true">◇</span><div><h3>Brace</h3><p>Press and hold Brace to resist the wind tunnel. Keep moving with your team; bracing slows your forward run.</p></div></article>
+            <article class="control"><span class="icon" aria-hidden="true">⚙</span><div><h3>Camera and HUD settings</h3><p>Use Follow, 3D Orbit, or Top camera. Drag the scene to orbit when available. In Settings, adjust HUD transparency, choose <strong>Customize HUD</strong> to move the stick and action buttons, or reset their positions.</p></div></article>
+          </div>
+          <div class="callout">Tip: coordinate over voice chat. Call out the next hazard, wait for teammates who fall behind, and keep an eye on the rope-tension meter.</div>
+        </section>
+
+        <section aria-labelledby="hazards-title">
+          <h2 id="hazards-title">Course hazards</h2>
+          <p class="section-intro">Hazard order and placement can change between races. Follow the on-screen cue and help your team through each section.</p>
+          <div class="hazards">
+            <article class="hazard"><span class="hazard-tag">Jump</span><h3>Spike pit</h3><p>Build forward speed, then jump over the spikes. Falling into the pit sends your team back to its last checkpoint.</p></article>
+            <article class="hazard"><span class="hazard-tag">Jump</span><h3>Path boulder</h3><p>Jump over the stone. Hitting it while too low bumps you back, so reset your approach and try again.</p></article>
+            <article class="hazard"><span class="hazard-tag">Keep moving</span><h3>Rope bridge</h3><p>Run across the swaying bridge. Do not stop on it: after a short pause the bridge can give way and trigger a team rescue.</p></article>
+            <article class="hazard"><span class="hazard-tag">Jump</span><h3>Open river</h3><p>Run and jump across the gap, aiming to land beyond the water. Falling in regroups the team at its checkpoint.</p></article>
+            <article class="hazard"><span class="hazard-tag">Hold Brace</span><h3>Wind tunnel</h3><p>Hold Brace against the gusts. The wind slows runners who push through without bracing.</p></article>
+            <article class="hazard"><span class="hazard-tag">Jump</span><h3>Lava flow</h3><p>Leap over the lava and keep moving. Landing in it triggers a team rescue.</p></article>
+          </div>
+        </section>
+
+        <section aria-labelledby="race-title">
+          <h2 id="race-title">Race rules</h2>
+          <ul class="rules-list">
+            <li><span><strong>Stay with your squad.</strong> Teammates are linked by a rope. If runners spread too far apart, the tether pulls them back together; crossing hazards as a group is safer.</span></li>
+            <li><span><strong>Checkpoints follow the team.</strong> Your team secures progress when its trailing runner reaches a checkpoint. If someone falls, the squad regroups at the latest checkpoint.</span></li>
+            <li><span><strong>Rescues are shared.</strong> Each team gets three rescues for the race. A fall into a major hazard or a bridge collapse spends one. If a team runs out of rescues and fails again, the other team wins.</span></li>
+            <li><span><strong>Run in rhythm for a Squad Surge.</strong> On a clear stretch, when everyone is grounded, moving forward, and close together, your squad can charge a brief speed boost. Hazards and bracing pause the charge.</span></li>
+            <li><span><strong>The whole team must finish.</strong> The first team whose runners all reach the finish wins. If both teams complete together, the result is a tie.</span></li>
+            <li><span><strong>Late arrivals wait for the next round.</strong> Team changes are locked after the start. Reconnect or join the lobby before the next race to play with a team.</span></li>
+          </ul>
+        </section>
+
+        <section aria-labelledby="fair-title">
+          <h2 id="fair-title">Fair play and voice chat</h2>
+          <ul class="rules-list">
+            <li><span>Play as a team: do not intentionally sabotage your squad or exploit bugs to disrupt another team.</span></li>
+            <li><span>Keep voice chat respectful. Use the microphone control to mute when needed, and avoid sharing personal or sensitive information in a room.</span></li>
+            <li><span>Share room codes only with people you want in your room. Leave the game or voice room when you are done.</span></li>
+          </ul>
+          <div class="callout">Ropebound is a casual team race. Controls, course layout, and timing may be tuned as the game improves; the in-game prompts take precedence if they differ from this guide.</div>
+        </section>
+      </main>
+
+      <footer>SquadVoice · <a href="./">Back to home</a> · Ropebound 3D game guide</footer>
+    </div>
+  </body>
+</html>

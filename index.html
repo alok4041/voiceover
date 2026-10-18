@@ -46,6 +46,11 @@
       .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(178, 164, 255, .38); border-radius: 11px; background: rgba(137, 112, 255, .14); color: #c2b5ff; }
       .brand-mark svg { width: 19px; height: 19px; }
       .header-note { color: #9da2b3; font-size: 13px; }
+      .header-links { display: flex; align-items: center; gap: 20px; }
+      .header-links nav { display: flex; align-items: center; gap: 16px; }
+      .header-links a { color: #c9c5d8; font-size: 12px; font-weight: 650; text-decoration: none; }
+      .header-links a:hover, .header-links a[aria-current="page"] { color: #b8aaff; }
+      .header-links a[aria-current="page"] { text-decoration: underline; text-underline-offset: 5px; }
 
       main { padding: 72px 0 64px; }
       .hero { max-width: 720px; margin: 0 auto; text-align: center; }
@@ -118,6 +123,10 @@
         .shell { width: min(100% - 30px, 520px); }
         header { min-height: 68px; }
         .header-note { font-size: 11px; }
+        .header-links { gap: 0; }
+        .header-links nav { gap: 12px; }
+        .header-links a { font-size: 11px; }
+        .header-note { display: none; }
         main { padding: 52px 0 46px; }
         .features, .steps { grid-template-columns: 1fr; }
         .features { gap: 10px; margin-top: 38px; }
@@ -146,7 +155,13 @@
           </span>
           SQUADVOICE
         </a>
-        <span class="header-note">Android voice rooms</span>
+        <div class="header-links">
+          <span class="header-note">Android voice rooms</span>
+          <nav aria-label="Main navigation">
+            <a href="./" aria-current="page">Home</a>
+            <a href="./rules.html">Game Rules</a>
+          </nav>
+        </div>
       </header>
 
       <main>

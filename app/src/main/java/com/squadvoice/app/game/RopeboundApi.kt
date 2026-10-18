@@ -18,6 +18,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 internal sealed interface RopeboundRealtimeEvent {
@@ -100,8 +101,16 @@ internal data class RopeboundSnapshot(
 internal class RopeboundApi(
     private val baseUrl: String = BuildConfig.TOKEN_SERVER_URL,
 ) {
-    private val realtimeClient = OkHttpClient()
     private val realtimeSocket = AtomicReference<WebSocket?>(null)
+
+    companion object {
+        private val realtimeClient: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
 
     suspend fun join(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/join", roomCode, participantToken)
