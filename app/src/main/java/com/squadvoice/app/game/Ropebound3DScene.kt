@@ -7,6 +7,7 @@ import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.os.SystemClock
+import android.view.WindowManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
-import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
@@ -52,6 +52,7 @@ internal fun Ropebound3DScene(
     cameraOrbitPitch: Float = 0f,
     liveControlFeed: RopeboundLiveControlFeed? = null,
     previewMode: Boolean = false,
+    qualityMode: RopeboundQualityMode = RopeboundQualityMode.AUTO,
     onCameraOrbitDrag: ((Float, Float) -> Unit)? = null,
     showPlayerNameplates: Boolean = true,
     modifier: Modifier = Modifier,
@@ -76,6 +77,7 @@ internal fun Ropebound3DScene(
                 orbitPitch = activePitch,
                 liveControlFeed = liveControlFeed,
                 previewMode = previewMode,
+                qualityMode = qualityMode,
             ),
         )
     }
@@ -177,7 +179,7 @@ private fun RopeboundPlayerNameplates(
             ((local?.height ?: 0f) / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
         }
 
-        Matrix.perspectiveM(projection, 0, 56f, size.width / size.height.coerceAtLeast(1f), 0.1f, 190f)
+        Matrix.perspectiveM(projection, 0, 56f, size.width / size.height.coerceAtLeast(1f), 0.1f, 220f)
         computeCameraLookAt(camera, cameraBlend, orbitYaw, orbitPitch, focusX, focusY)
         Matrix.multiplyMM(viewProjection, 0, projection, 0, camera, 0)
 
@@ -242,11 +244,12 @@ private data class Ropebound3DState(
     val orbitPitch: Float = 0f,
     val liveControlFeed: RopeboundLiveControlFeed? = null,
     val previewMode: Boolean = false,
+    val qualityMode: RopeboundQualityMode = RopeboundQualityMode.AUTO,
 )
 
 private class Ropebound3DView(context: Context) : GLSurfaceView(context) {
     val telemetry = RopeboundLiveRenderTelemetry()
-    private val gameRenderer = Ropebound3DRenderer(telemetry)
+    private val gameRenderer = Ropebound3DRenderer(context.applicationContext, telemetry) { readDisplayRefreshRate() }
 
     init {
         setEGLContextClientVersion(2)
@@ -256,11 +259,38 @@ private class Ropebound3DView(context: Context) : GLSurfaceView(context) {
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
+    @Suppress("DEPRECATION")
+    private fun readDisplayRefreshRate(): Float {
+        val rate = display?.refreshRate
+            ?: (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay?.refreshRate
+            ?: 60f
+        return rate.coerceIn(30f, 144f)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        gameRenderer.notifyResume(readDisplayRefreshRate())
+    }
+
     fun submit(state: Ropebound3DState) = gameRenderer.submit(state)
 }
 
+private class ShaderHandles(
+    val program: Int,
+    val posLoc: Int,
+    val normLoc: Int,
+    val colLoc: Int,
+    val uvLoc: Int,
+    val mvpLoc: Int,
+    val eyeLoc: Int,
+    val texLoc: Int,
+    val scrollLoc: Int,
+)
+
 private class Ropebound3DRenderer(
+    context: Context,
     private val telemetry: RopeboundLiveRenderTelemetry,
+    private val refreshRateProvider: () -> Float,
 ) : GLSurfaceView.Renderer {
     @Volatile
     private var scene = Ropebound3DState(
@@ -269,14 +299,13 @@ private class Ropebound3DRenderer(
         emptyList(),
         0f,
     )
+    private val textureBank = RopeboundTextureBank(context)
     private val reusableMesh = TriangleMesh()
-    private var program = 0
-    private var positionHandle = 0
-    private var normalHandle = 0
-    private var colorHandle = 0
-    private var mvpHandle = 0
-    private var eyePosHandle = 0
-    private var timeHandle = 0
+
+    private var skyShader: ShaderHandles? = null
+    private var litShader: ShaderHandles? = null
+    private var waterShader: ShaderHandles? = null
+
     private var width = 1
     private var height = 1
     private val projection = FloatArray(16)
@@ -285,6 +314,16 @@ private class Ropebound3DRenderer(
     private val mvp = FloatArray(16)
     private val epoch = System.nanoTime()
     private var lastFrameAt = 0f
+
+    // Refresh-rate-relative Auto quality hysteresis state
+    @Volatile private var vsyncPeriodMs = 16.67f
+    @Volatile private var warmupUntilSec = 1.5f
+    private var cooldownUntilSec = 0f
+    private var overBudgetAccumSec = 0f
+    private var underBudgetAccumSec = 0f
+    private var emaFrameMs = 16.67f
+    private var autoTier = RopeboundQualityTier.HIGH
+
     private var smoothProgress = -1f
     private var smoothFocusX = 0f
     private var smoothFocusY = 0f
@@ -292,172 +331,177 @@ private class Ropebound3DRenderer(
     private var predLocalLat = 0f
     private var predForwardVel = 0f
     private var predLateralVel = 0f
-    private var vertexBuffer: FloatBuffer? = null
     private val runnerTrackers = HashMap<String, RunnerMotionTracker>()
     private val cutStarts = FloatArray(12)
     private val cutEnds = FloatArray(12)
     private val anchorPoints = arrayOfNulls<Point3>(12)
 
+    private val opaqueBatches = intArrayOf(
+        MatId.STONE,
+        MatId.WOOD,
+        MatId.DIRT,
+        MatId.GRASS,
+        MatId.BASALT,
+        MatId.FOLIAGE,
+        MatId.VERTEX_COLOR,
+    )
+
     fun submit(next: Ropebound3DState) {
         scene = next
     }
 
+    fun notifyResume(refreshRateHz: Float) {
+        vsyncPeriodMs = 1000f / refreshRateHz.coerceIn(30f, 144f)
+        val now = (System.nanoTime() - epoch) / 1_000_000_000f
+        warmupUntilSec = now + 1.5f
+        overBudgetAccumSec = 0f
+        underBudgetAccumSec = 0f
+    }
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.28f, 0.68f, 0.96f, 1f)
+        GLES20.glClearColor(0.24f, 0.64f, 0.94f, 1f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
 
-        val vertexShader = """
+        notifyResume(refreshRateProvider())
+        textureBank.release()
+
+        val commonVs = """
             uniform mat4 uMvp;
             attribute vec3 aPosition;
             attribute vec3 aNormal;
             attribute vec3 aColor;
+            attribute vec2 aUv;
             varying vec3 vWorldPos;
             varying vec3 vNormal;
             varying vec3 vColor;
+            varying vec2 vUv;
             void main() {
                 gl_Position = uMvp * vec4(aPosition, 1.0);
                 vWorldPos = aPosition;
                 vNormal = aNormal;
                 vColor = aColor;
+                vUv = aUv;
             }
         """.trimIndent()
 
-        // Multi-Material Procedural GLSL Shader:
-        // Computes 3D ashlar stone masonry mortar & rock crevices, weathered wood plank grain,
-        // animated turquoise river caustics & white-water foam, dappled sunlit foliage, and atmospheric canyon haze.
-        val fragmentShader = """
+        // 1. Skydome program: unlit, no fog, drawn with depth-writes OFF centered on the camera
+        val skyFs = """
+            precision mediump float;
+            uniform sampler2D uTexture;
+            varying vec3 vColor;
+            varying vec2 vUv;
+            void main() {
+                vec4 tex = texture2D(uTexture, vUv);
+                gl_FragColor = vec4(clamp(tex.rgb * vColor, 0.0, 1.0), 1.0);
+            }
+        """.trimIndent()
+
+        // 2. Unified branchless Painterly Toon + Soft Rim + Height Fog program for all opaque batches & 1x1 white vertex-colored batch
+        val litFs = """
             precision mediump float;
             uniform vec3 uEyePos;
-            uniform float uTime;
+            uniform sampler2D uTexture;
             varying vec3 vWorldPos;
             varying vec3 vNormal;
             varying vec3 vColor;
-
-            float hash3(vec3 p) {
-                p = fract(p * vec3(443.897, 441.423, 437.195));
-                p += dot(p, p.yzx + 19.19);
-                return fract((p.x + p.y) * p.z);
-            }
-
-            float noise3(vec3 p) {
-                vec3 i = floor(p);
-                vec3 f = fract(p);
-                f = f * f * (3.0 - 2.0 * f);
-                return mix(
-                    mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
-                        mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
-                    mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
-                        mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
-                    f.z
-                );
-            }
-
+            varying vec2 vUv;
             void main() {
+                vec4 tex = texture2D(uTexture, vUv);
+                vec3 albedo = tex.rgb * vColor;
                 float nLen = length(vNormal);
-                vec3 baseCol = vColor;
+                vec3 N = (nLen > 0.2) ? (vNormal / nLen) : vec3(0.0, 1.0, 0.0);
+                vec3 V = normalize(uEyePos - vWorldPos);
+                N = mix(N, -N, step(dot(N, V), -0.15));
+
+                vec3 L = normalize(vec3(0.45, 0.84, -0.32));
+                vec3 H = normalize(L + V);
+                float ndl = dot(N, L) * 0.5 + 0.5;
+                float cel = mix(0.48, 0.82, smoothstep(0.36, 0.48, ndl));
+                cel = mix(cel, 1.08, smoothstep(0.68, 0.82, ndl));
+
+                vec3 skyAmb = vec3(0.76, 0.90, 1.0);
+                vec3 mossAmb = vec3(0.36, 0.52, 0.36);
+                vec3 hemi = mix(mossAmb, skyAmb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+
+                float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.22 * max(N.y + 0.25, 0.0);
+                float spec = pow(max(dot(N, H), 0.0), 24.0) * 0.16;
+                vec3 sunColor = vec3(1.04, 0.98, 0.88);
+
+                vec3 litCol = albedo * (hemi * 0.44 + sunColor * cel * 0.74) + vec3(spec + rim * 0.75);
+                float emissiveMask = step(nLen, 0.2);
+                vec3 color = mix(litCol, albedo, emissiveMask);
+
                 float dist = length(vWorldPos - uEyePos);
+                float fogFactor = clamp((dist - 40.0) / 96.0, 0.0, 0.72);
+                vec3 fogColor = mix(vec3(0.56, 0.84, 0.98), vec3(0.38, 0.70, 0.94), clamp(vWorldPos.y / 26.0, 0.0, 1.0));
+                color = mix(color, fogColor, fogFactor * fogFactor);
 
-                if (nLen > 0.2) {
-                    vec3 N = vNormal / nLen;
-                    vec3 V = normalize(uEyePos - vWorldPos);
-                    if (dot(N, V) < -0.15) N = -N;
-
-                    // 1. Procedural Turquoise Water Caustics & White-Water Foam Rapids
-                    bool isWater = (baseCol.b > baseCol.r * 1.35 && baseCol.g > 0.35 && vWorldPos.z < 90.0);
-                    if (isWater) {
-                        vec2 uv = vWorldPos.xz * 0.55;
-                        float w1 = noise3(vec3(uv * 2.2 + vec2(uTime * 0.9, -uTime * 1.4), uTime * 0.5));
-                        float w2 = noise3(vec3(uv * 4.5 - vec2(uTime * 1.2, uTime * 0.8), uTime * 0.7));
-                        float caustic = smoothstep(0.46, 0.78, w1 * 0.6 + w2 * 0.4);
-                        float shoreFoam = smoothstep(4.2, 5.2, abs(vWorldPos.x)) * (1.0 - smoothstep(5.2, 6.8, abs(vWorldPos.x)));
-                        float rapids = smoothstep(0.68, 0.84, w1 * 0.55 + w2 * 0.45 + shoreFoam * 0.32);
-                        baseCol = mix(vec3(0.04, 0.46, 0.76), vec3(0.14, 0.76, 0.94), caustic);
-                        baseCol = mix(baseCol, vec3(0.95, 0.99, 1.0), rapids * 0.88);
-                    }
-                    // 2. Procedural 3D Ashlar Stone Masonry, Mortar Grooves & Rock Crevices
-                    else if (abs(baseCol.r - baseCol.g) < 0.08 && baseCol.r > 0.26 && baseCol.r < 0.78 && vWorldPos.z < 72.0) {
-                        float row = floor(vWorldPos.y * 2.4);
-                        float bx = fract(vWorldPos.x * 0.85 + mod(row, 2.0) * 0.5);
-                        float by = fract(vWorldPos.y * 2.4);
-                        float bz = fract(vWorldPos.z * 0.85 + mod(row, 2.0) * 0.5);
-                        float mortar = smoothstep(0.05, 0.11, bx) * smoothstep(0.05, 0.11, 1.0 - bx)
-                                     * smoothstep(0.06, 0.13, by) * smoothstep(0.06, 0.13, 1.0 - by)
-                                     * smoothstep(0.05, 0.11, bz) * smoothstep(0.05, 0.11, 1.0 - bz);
-                        float rockGrain = noise3(vWorldPos * 3.2) * 0.24 + noise3(vWorldPos * 9.5) * 0.12;
-                        baseCol = baseCol * (0.76 + rockGrain) * (0.62 + 0.38 * mortar);
-                        // Top-edge emerald moss bleed on upward-facing stone ledges
-                        if (N.y > 0.55 && vWorldPos.y > -0.35 && vWorldPos.y < 3.2) {
-                            float mossMask = smoothstep(0.42, 0.68, noise3(vWorldPos * 2.4));
-                            baseCol = mix(baseCol, vec3(0.32, 0.72, 0.18), mossMask * 0.65);
-                        }
-                    }
-                    // 3. Procedural Weathered Wood Plank Grain
-                    else if (baseCol.r > baseCol.g * 1.22 && baseCol.g > baseCol.b * 1.22 && baseCol.r < 0.84) {
-                        float grain = sin(vWorldPos.x * 16.0 + noise3(vWorldPos * 4.0) * 5.0) * 0.5 + 0.5;
-                        baseCol *= (0.86 + 0.22 * grain);
-                    }
-                    // 4. Dappled Sunlit Foliage & Moss Turf Micro-Texture
-                    else if (baseCol.g > baseCol.r * 1.15 && baseCol.g > baseCol.b * 1.15 && vWorldPos.z < 75.0) {
-                        float leafTex = noise3(vWorldPos * 4.2);
-                        baseCol = mix(baseCol * 0.84, vec3(min(1.0, baseCol.r * 1.35 + 0.12), min(1.0, baseCol.g * 1.18), baseCol.b * 0.85), leafTex * 0.65);
-                    }
-
-                    vec3 L = normalize(vec3(0.45, 0.84, -0.32));
-                    vec3 H = normalize(L + V);
-                    float ndl = dot(N, L);
-                    float diffuse = clamp(ndl * 0.54 + 0.46, 0.0, 1.0);
-                    diffuse = diffuse * diffuse;
-
-                    vec3 skyAmb = vec3(0.74, 0.90, 1.0);
-                    vec3 groundAmb = vec3(0.34, 0.52, 0.38);
-                    vec3 hemi = mix(groundAmb, skyAmb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
-
-                    float specPower = isWater ? 42.0 : 24.0;
-                    float specStr = isWater ? 0.48 : 0.18;
-                    float spec = pow(max(dot(N, H), 0.0), specPower) * specStr;
-                    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.20 * max(N.y + 0.3, 0.0);
-
-                    vec3 sunColor = vec3(1.05, 0.99, 0.90);
-                    baseCol = baseCol * (hemi * 0.48 + sunColor * diffuse * 0.74) + vec3(spec + rim * 0.72);
-                }
-
-                // Rich Atmospheric Canyon Mist & Mountain Blue Haze
-                if (vWorldPos.z < 142.0) {
-                    float fogFactor = clamp((dist - 38.0) / 92.0, 0.0, 0.74);
-                    vec3 fogColor = mix(vec3(0.56, 0.84, 0.98), vec3(0.38, 0.70, 0.94), clamp(vWorldPos.y / 26.0, 0.0, 1.0));
-                    baseCol = mix(baseCol, fogColor, fogFactor * fogFactor);
-                }
-
-                gl_FragColor = vec4(clamp(baseCol, 0.0, 1.0), 1.0);
+                gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
             }
         """.trimIndent()
 
-        program = linkProgram(vertexShader, fragmentShader)
-        positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
-        normalHandle = GLES20.glGetAttribLocation(program, "aNormal")
-        colorHandle = GLES20.glGetAttribLocation(program, "aColor")
-        mvpHandle = GLES20.glGetUniformLocation(program, "uMvp")
-        eyePosHandle = GLES20.glGetUniformLocation(program, "uEyePos")
-        timeHandle = GLES20.glGetUniformLocation(program, "uTime")
+        // 3. Branchless scrolling water & waterfall program
+        val waterFs = """
+            precision mediump float;
+            uniform vec3 uEyePos;
+            uniform sampler2D uTexture;
+            uniform vec2 uScroll;
+            varying vec3 vWorldPos;
+            varying vec3 vNormal;
+            varying vec3 vColor;
+            varying vec2 vUv;
+            void main() {
+                vec2 uvA = vUv + uScroll;
+                vec2 uvB = vUv * 1.45 + vec2(-uScroll.x * 0.65, uScroll.y * 1.25);
+                vec3 texA = texture2D(uTexture, uvA).rgb;
+                vec3 texB = texture2D(uTexture, uvB).rgb;
+                vec3 waterCol = (texA * 0.58 + texB * 0.42) * vColor;
+
+                vec3 V = normalize(uEyePos - vWorldPos);
+                vec3 L = normalize(vec3(0.45, 0.84, -0.32));
+                vec3 H = normalize(L + V);
+                float spec = pow(max(H.y, 0.0), 38.0) * 0.36;
+                float foam = smoothstep(0.72, 0.90, (texA.r + texB.g) * 0.5);
+                vec3 color = mix(waterCol, vec3(0.95, 0.99, 1.0), foam * 0.65) + vec3(spec);
+
+                float dist = length(vWorldPos - uEyePos);
+                float fogFactor = clamp((dist - 40.0) / 96.0, 0.0, 0.72);
+                vec3 fogColor = mix(vec3(0.56, 0.84, 0.98), vec3(0.38, 0.70, 0.94), clamp(vWorldPos.y / 26.0, 0.0, 1.0));
+                color = mix(color, fogColor, fogFactor * fogFactor);
+
+                gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+            }
+        """.trimIndent()
+
+        skyShader = buildShaderHandles(commonVs, skyFs)
+        litShader = buildShaderHandles(commonVs, litFs)
+        waterShader = buildShaderHandles(commonVs, waterFs)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         this.width = width.coerceAtLeast(1)
         this.height = height.coerceAtLeast(1)
         GLES20.glViewport(0, 0, this.width, this.height)
-        Matrix.perspectiveM(projection, 0, 56f, this.width.toFloat() / this.height, 0.1f, 190f)
+        Matrix.perspectiveM(projection, 0, 56f, this.width.toFloat() / this.height, 0.1f, 220f)
+        vsyncPeriodMs = 1000f / refreshRateProvider().coerceIn(30f, 144f)
     }
 
     override fun onDrawFrame(gl: GL10?) {
         val now = (System.nanoTime() - epoch) / 1_000_000_000f
-        val dt = if (lastFrameAt == 0f) 1f / 60f else (now - lastFrameAt).coerceIn(0.004f, 0.045f)
-        if (now - lastFrameAt < 1f / 62f) return
+        val rawDt = if (lastFrameAt == 0f) vsyncPeriodMs / 1000f else (now - lastFrameAt)
         lastFrameAt = now
 
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         val current = scene
+        val activeTier = updateQualityHysteresis(now, rawDt, current.qualityMode)
+        telemetry.activeQualityTier = activeTier
+        telemetry.emaFrameMs = emaFrameMs
+        textureBank.ensureLoaded(activeTier)
+
+        val dt = rawDt.coerceIn(0.002f, 0.045f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+
         val feed = current.liveControlFeed
         val liveMove = feed?.move ?: 0f
         val liveSteer = feed?.steer ?: 0f
@@ -548,20 +592,6 @@ private class Ropebound3DRenderer(
         telemetry.focusY = smoothFocusY
         telemetry.playerCount = current.team.players.size
 
-        reusableMesh.reset()
-        buildWorld(
-            mesh = reusableMesh,
-            state = current,
-            cameraProgress = smoothProgress,
-            liveMove = liveMove,
-            liveSteer = liveSteer,
-            liveBracing = liveBracing,
-            inLocalJump = inLocalJump,
-            localJumpHeight = localJumpHeight,
-            time = now,
-            dt = dt,
-        )
-
         computeCameraLookAt(view, current.cameraBlend, current.orbitYaw, current.orbitPitch, smoothFocusX, smoothFocusY)
         Matrix.multiplyMM(vp, 0, projection, 0, view, 0)
         Matrix.multiplyMM(mvp, 0, vp, 0, IDENTITY, 0)
@@ -575,32 +605,169 @@ private class Ropebound3DRenderer(
         val eyeY = (smoothFocusY * 0.35f + baseHeight + sin(effectivePitch) * baseRadius).coerceAtLeast(1.15f)
         val eyeZ = -cos(effectiveYaw) * baseRadius * cos(effectivePitch) + 0.6f
 
-        val buffer = reusableMesh.fillBuffer(vertexBuffer)
-        vertexBuffer = buffer
+        reusableMesh.reset()
+        // Build camera-centered skydome into MatId.SKY
+        reusableMesh.skydome(eyeX, eyeY, eyeZ, radius = 124f)
 
-        GLES20.glUseProgram(program)
-        GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
-        GLES20.glUniform3f(eyePosHandle, eyeX, eyeY, eyeZ)
-        GLES20.glUniform1f(timeHandle, now)
+        buildWorld(
+            mesh = reusableMesh,
+            state = current,
+            cameraProgress = smoothProgress,
+            liveMove = liveMove,
+            liveSteer = liveSteer,
+            liveBracing = liveBracing,
+            inLocalJump = inLocalJump,
+            localJumpHeight = localJumpHeight,
+            time = now,
+            dt = dt,
+        )
 
-        val strideBytes = 9 * 4
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glEnableVertexAttribArray(normalHandle)
-        GLES20.glEnableVertexAttribArray(colorHandle)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+
+        // Pass 1: Skydome (depth writes OFF, centered on camera, no fog)
+        skyShader?.let { sh ->
+            GLES20.glDepthMask(false)
+            drawBatch(sh, reusableMesh.batch(MatId.SKY), textureBank.textureId(MatId.SKY), eyeX, eyeY, eyeZ, 0f, 0f)
+            GLES20.glDepthMask(true)
+        }
+
+        // Pass 2: Opaque textured batches + 1x1 white vertex-colored batch using the single unified litShader
+        litShader?.let { sh ->
+            for (matId in opaqueBatches) {
+                drawBatch(sh, reusableMesh.batch(matId), textureBank.textureId(matId), eyeX, eyeY, eyeZ, 0f, 0f)
+            }
+        }
+
+        // Pass 3: Scrolling water & waterfall batches
+        waterShader?.let { sh ->
+            drawBatch(
+                sh,
+                reusableMesh.batch(MatId.WATER),
+                textureBank.textureId(MatId.WATER),
+                eyeX,
+                eyeY,
+                eyeZ,
+                scrollU = (now * 0.08f) % 1f,
+                scrollV = -(now * 0.14f) % 1f,
+            )
+            drawBatch(
+                sh,
+                reusableMesh.batch(MatId.WATERFALL),
+                textureBank.textureId(MatId.WATERFALL),
+                eyeX,
+                eyeY,
+                eyeZ,
+                scrollU = 0f,
+                scrollV = -(now * 0.65f) % 1f,
+            )
+        }
+
+        telemetry.framesRendered++
+    }
+
+    /**
+     * Refresh-rate-relative Auto quality hysteresis:
+     * - Ignores first 1.5 s after surface create/resume and any frame > 250 ms.
+     * - Steps DOWN 1 tier when EMA frame time > 1.6x vsync period for 3.0 s (starts 15 s cooldown).
+     * - Steps UP 1 tier when EMA frame time < 1.15x vsync period for 10.0 s (after cooldown).
+     */
+    private fun updateQualityHysteresis(
+        nowSec: Float,
+        rawDtSec: Float,
+        mode: RopeboundQualityMode,
+    ): RopeboundQualityTier {
+        when (mode) {
+            RopeboundQualityMode.LOW -> return RopeboundQualityTier.LOW
+            RopeboundQualityMode.MEDIUM -> return RopeboundQualityTier.MEDIUM
+            RopeboundQualityMode.HIGH -> return RopeboundQualityTier.HIGH
+            RopeboundQualityMode.AUTO -> Unit
+        }
+        if (nowSec < warmupUntilSec || rawDtSec <= 0f || rawDtSec > 0.25f) {
+            return autoTier
+        }
+        val frameMs = rawDtSec * 1000f
+        emaFrameMs = emaFrameMs * 0.92f + frameMs * 0.08f
+
+        val stepDownThresholdMs = vsyncPeriodMs * 1.60f
+        val stepUpThresholdMs = vsyncPeriodMs * 1.15f
+
+        if (emaFrameMs > stepDownThresholdMs) {
+            overBudgetAccumSec += rawDtSec
+            underBudgetAccumSec = 0f
+            if (overBudgetAccumSec >= 3.0f) {
+                overBudgetAccumSec = 0f
+                cooldownUntilSec = nowSec + 15.0f
+                autoTier = when (autoTier) {
+                    RopeboundQualityTier.HIGH -> RopeboundQualityTier.MEDIUM
+                    RopeboundQualityTier.MEDIUM, RopeboundQualityTier.LOW -> RopeboundQualityTier.LOW
+                }
+            }
+        } else if (emaFrameMs < stepUpThresholdMs && nowSec >= cooldownUntilSec) {
+            underBudgetAccumSec += rawDtSec
+            overBudgetAccumSec = 0f
+            if (underBudgetAccumSec >= 10.0f) {
+                underBudgetAccumSec = 0f
+                autoTier = when (autoTier) {
+                    RopeboundQualityTier.LOW -> RopeboundQualityTier.MEDIUM
+                    RopeboundQualityTier.MEDIUM, RopeboundQualityTier.HIGH -> RopeboundQualityTier.HIGH
+                }
+            }
+        } else {
+            overBudgetAccumSec = max(0f, overBudgetAccumSec - rawDtSec * 0.5f)
+            underBudgetAccumSec = max(0f, underBudgetAccumSec - rawDtSec * 0.5f)
+        }
+        return autoTier
+    }
+
+    private fun drawBatch(
+        sh: ShaderHandles,
+        batch: MaterialBatch,
+        texId: Int,
+        eyeX: Float,
+        eyeY: Float,
+        eyeZ: Float,
+        scrollU: Float,
+        scrollV: Float,
+    ) {
+        val count = batch.vertexCount
+        if (count <= 0) return
+        val buffer = batch.prepareBuffer()
+
+        GLES20.glUseProgram(sh.program)
+        GLES20.glUniformMatrix4fv(sh.mvpLoc, 1, false, mvp, 0)
+        if (sh.eyeLoc >= 0) GLES20.glUniform3f(sh.eyeLoc, eyeX, eyeY, eyeZ)
+        if (sh.scrollLoc >= 0) GLES20.glUniform2f(sh.scrollLoc, scrollU, scrollV)
+        if (sh.texLoc >= 0) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
+            GLES20.glUniform1i(sh.texLoc, 0)
+        }
 
         buffer.position(0)
-        GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, strideBytes, buffer)
-        buffer.position(3)
-        GLES20.glVertexAttribPointer(normalHandle, 3, GLES20.GL_FLOAT, false, strideBytes, buffer)
-        buffer.position(6)
-        GLES20.glVertexAttribPointer(colorHandle, 3, GLES20.GL_FLOAT, false, strideBytes, buffer)
+        GLES20.glEnableVertexAttribArray(sh.posLoc)
+        GLES20.glVertexAttribPointer(sh.posLoc, 3, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, buffer)
 
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, reusableMesh.vertexCount)
+        if (sh.normLoc >= 0) {
+            buffer.position(3)
+            GLES20.glEnableVertexAttribArray(sh.normLoc)
+            GLES20.glVertexAttribPointer(sh.normLoc, 3, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, buffer)
+        }
+        if (sh.colLoc >= 0) {
+            buffer.position(6)
+            GLES20.glEnableVertexAttribArray(sh.colLoc)
+            GLES20.glVertexAttribPointer(sh.colLoc, 3, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, buffer)
+        }
+        if (sh.uvLoc >= 0) {
+            buffer.position(9)
+            GLES20.glEnableVertexAttribArray(sh.uvLoc)
+            GLES20.glVertexAttribPointer(sh.uvLoc, 2, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, buffer)
+        }
 
-        GLES20.glDisableVertexAttribArray(positionHandle)
-        GLES20.glDisableVertexAttribArray(normalHandle)
-        GLES20.glDisableVertexAttribArray(colorHandle)
-        telemetry.framesRendered++
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, count)
+
+        GLES20.glDisableVertexAttribArray(sh.posLoc)
+        if (sh.normLoc >= 0) GLES20.glDisableVertexAttribArray(sh.normLoc)
+        if (sh.colLoc >= 0) GLES20.glDisableVertexAttribArray(sh.colLoc)
+        if (sh.uvLoc >= 0) GLES20.glDisableVertexAttribArray(sh.uvLoc)
     }
 
     private fun buildWorld(
@@ -642,13 +809,9 @@ private class Ropebound3DRenderer(
             cutStarts[j + 1] = ks; cutEnds[j + 1] = ke
         }
 
-        // 1. Sky, Sunlit Cumulus Clouds, Jagged Alpine Ranges, Forest Cliff Mesas & Twin Roaring Waterfalls
         drawMountainVista(mesh, time)
-
-        // 2. Rushing Turquoise Canyon River Gorge & Stepped Mossy Cliff Banks (No Flat Green Lawn!)
         drawValleySideHills(mesh, cameraProgress, cutCount, cutStarts, cutEnds)
 
-        // 3. Elevated Stepped Ashlar Stone Causeway & Mossy Ledges
         var roadZ = -20f
         for (i in 0 until cutCount) {
             val boundedStart = cutStarts[i].coerceIn(-20f, 96f)
@@ -658,10 +821,8 @@ private class Ropebound3DRenderer(
         }
         if (roadZ < 96f) drawTrail(mesh, roadZ, 96f)
 
-        // 4. Ancient Ivy-Draped Stone Ruin Archways, Gnarled Canopy Trees & Wildflowers
         drawMeadows(mesh, cameraProgress, time, cutCount, cutStarts, cutEnds)
 
-        // 5. Course Hazards (Timber Trestle Rope Bridge, Canyon Rapids, Stone Ruin Chasm, Mossy Boulders, Lava)
         for (i in state.obstacles.indices) {
             val obstacle = state.obstacles[i]
             val z1 = zAt(obstacle.start)
@@ -753,14 +914,24 @@ private class Ropebound3DRenderer(
         )
     }
 
-    private fun linkProgram(vertexSource: String, fragmentSource: String): Int {
+    private fun buildShaderHandles(vertexSource: String, fragmentSource: String): ShaderHandles {
         val vertex = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
         val fragment = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
         val program = GLES20.glCreateProgram()
         GLES20.glAttachShader(program, vertex)
         GLES20.glAttachShader(program, fragment)
         GLES20.glLinkProgram(program)
-        return program
+        return ShaderHandles(
+            program = program,
+            posLoc = GLES20.glGetAttribLocation(program, "aPosition"),
+            normLoc = GLES20.glGetAttribLocation(program, "aNormal"),
+            colLoc = GLES20.glGetAttribLocation(program, "aColor"),
+            uvLoc = GLES20.glGetAttribLocation(program, "aUv"),
+            mvpLoc = GLES20.glGetUniformLocation(program, "uMvp"),
+            eyeLoc = GLES20.glGetUniformLocation(program, "uEyePos"),
+            texLoc = GLES20.glGetUniformLocation(program, "uTexture"),
+            scrollLoc = GLES20.glGetUniformLocation(program, "uScroll"),
+        )
     }
 
     private fun compileShader(type: Int, source: String): Int {
