@@ -821,7 +821,7 @@ private class Ropebound3DRenderer(
             if (boundedStart > roadZ) drawTrail(mesh, roadZ, boundedStart, qualityTier)
             roadZ = max(roadZ, boundedEnd)
         }
-        if (roadZ < 96f) drawTrail(mesh, roadZ, 96f)
+        if (roadZ < 96f) drawTrail(mesh, roadZ, 96f, qualityTier)
 
         drawMeadows(mesh, cameraProgress, time, cutCount, cutStarts, cutEnds, qualityTier)
 
@@ -831,13 +831,13 @@ private class Ropebound3DRenderer(
             val z2 = zAt(obstacle.end)
             if (max(z1, z2) < -22f || min(z1, z2) > 105f) continue
             when (obstacle.id) {
-                "pit" -> buildPitHazard(mesh, z1, z2, time)
-                "boulder" -> buildBoulderHazard(mesh, z1, z2, time)
+                "pit" -> buildPitHazard(mesh, z1, z2, time, qualityTier)
+                "boulder" -> buildBoulderHazard(mesh, z1, z2, time, qualityTier)
                 "river-bridge", "river-gap" -> {
-                    buildRiver(mesh, z1, z2, obstacle.id == "river-bridge", time, state.team.players, cameraProgress)
+                    buildRiver(mesh, z1, z2, obstacle.id == "river-bridge", time, state.team.players, cameraProgress, qualityTier)
                 }
-                "wind-tunnel" -> buildWindTunnel(mesh, z1, z2, time)
-                "lava" -> buildLava(mesh, z1, z2, time)
+                "wind-tunnel" -> buildWindTunnel(mesh, z1, z2, time, qualityTier)
+                "lava" -> buildLava(mesh, z1, z2, time, qualityTier)
             }
         }
 
