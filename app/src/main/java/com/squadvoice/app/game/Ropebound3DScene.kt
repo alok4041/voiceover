@@ -618,6 +618,7 @@ private class Ropebound3DRenderer(
             liveBracing = liveBracing,
             inLocalJump = inLocalJump,
             localJumpHeight = localJumpHeight,
+            qualityTier = activeTier,
             time = now,
             dt = dt,
         )
@@ -779,6 +780,7 @@ private class Ropebound3DRenderer(
         liveBracing: Boolean,
         inLocalJump: Boolean,
         localJumpHeight: Float,
+        qualityTier: RopeboundQualityTier,
         time: Float,
         dt: Float,
     ) {
@@ -809,19 +811,19 @@ private class Ropebound3DRenderer(
             cutStarts[j + 1] = ks; cutEnds[j + 1] = ke
         }
 
-        drawMountainVista(mesh, time)
-        drawValleySideHills(mesh, cameraProgress, cutCount, cutStarts, cutEnds)
+        drawMountainVista(mesh, time, qualityTier)
+        drawValleySideHills(mesh, cameraProgress, cutCount, cutStarts, cutEnds, qualityTier)
 
         var roadZ = -20f
         for (i in 0 until cutCount) {
             val boundedStart = cutStarts[i].coerceIn(-20f, 96f)
             val boundedEnd = cutEnds[i].coerceIn(-20f, 96f)
-            if (boundedStart > roadZ) drawTrail(mesh, roadZ, boundedStart)
+            if (boundedStart > roadZ) drawTrail(mesh, roadZ, boundedStart, qualityTier)
             roadZ = max(roadZ, boundedEnd)
         }
         if (roadZ < 96f) drawTrail(mesh, roadZ, 96f)
 
-        drawMeadows(mesh, cameraProgress, time, cutCount, cutStarts, cutEnds)
+        drawMeadows(mesh, cameraProgress, time, cutCount, cutStarts, cutEnds, qualityTier)
 
         for (i in state.obstacles.indices) {
             val obstacle = state.obstacles[i]

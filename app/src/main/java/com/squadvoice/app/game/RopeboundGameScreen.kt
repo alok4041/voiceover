@@ -101,6 +101,10 @@ internal fun RopeboundGameScreen(
     var gameSettingsOpen by remember { mutableStateOf(false) }
     var hudOpacity by remember { mutableStateOf(hudPreferences.getFloat("opacity", .88f).coerceIn(.35f, 1f)) }
     var hudEditMode by remember { mutableStateOf(false) }
+    var qualityMode by remember {
+        val saved = hudPreferences.getString("quality_mode", RopeboundQualityMode.AUTO.name) ?: RopeboundQualityMode.AUTO.name
+        mutableStateOf(runCatching { RopeboundQualityMode.valueOf(saved) }.getOrDefault(RopeboundQualityMode.AUTO))
+    }
     var joystickPosition by remember {
         mutableStateOf(Offset(hudPreferences.getFloat("stick_x", .025f), hudPreferences.getFloat("stick_y", .67f)))
     }
@@ -135,7 +139,7 @@ internal fun RopeboundGameScreen(
         onDispose { gameAudio.release() }
     }
 
-    LaunchedEffect(hudOpacity, joystickPosition, jumpPosition, bracePosition) {
+    LaunchedEffect(hudOpacity, joystickPosition, jumpPosition, bracePosition, qualityMode) {
         hudPreferences.edit()
             .putFloat("opacity", hudOpacity)
             .putFloat("stick_x", joystickPosition.x)
@@ -144,6 +148,7 @@ internal fun RopeboundGameScreen(
             .putFloat("jump_y", jumpPosition.y)
             .putFloat("brace_x", bracePosition.x)
             .putFloat("brace_y", bracePosition.y)
+            .putString("quality_mode", qualityMode.name)
             .apply()
     }
 
@@ -591,6 +596,7 @@ internal fun RopeboundGameScreen(
                     onStick = ::setStick,
                     hudOpacity = hudOpacity,
                     hudEditMode = hudEditMode,
+                    qualityMode = qualityMode,
                     joystickPosition = joystickPosition,
                     jumpPosition = jumpPosition,
                     bracePosition = bracePosition,
@@ -619,6 +625,7 @@ internal fun RopeboundGameScreen(
                         viewerIdentity = identity,
                         obstacles = state.obstacles,
                         cameraBlend = .42f,
+                        qualityMode = qualityMode,
                         showPlayerNameplates = false,
                         modifier = Modifier.fillMaxSize(),
                         onReady = {},
@@ -717,6 +724,7 @@ internal fun RopeboundGameScreen(
                 sfxVolume = sfxVolume,
                 hudOpacity = hudOpacity,
                 hudEditMode = hudEditMode,
+                qualityMode = qualityMode,
                 onSoundEnabledChange = { soundEnabled = gameAudio.setEnabled(it) },
                 onAmbienceVolumeChange = {
                     ambienceVolume = it
@@ -728,8 +736,10 @@ internal fun RopeboundGameScreen(
                 },
                 onHudOpacityChange = { hudOpacity = it.coerceIn(.35f, 1f) },
                 onHudEditModeChange = { hudEditMode = it },
+                onQualityModeChange = { qualityMode = it },
                 onResetHud = {
                     hudOpacity = .88f
+                    qualityMode = RopeboundQualityMode.AUTO
                     joystickPosition = Offset(.025f, .67f)
                     jumpPosition = Offset(.78f, .78f)
                     bracePosition = Offset(.89f, .78f)
@@ -737,6 +747,7 @@ internal fun RopeboundGameScreen(
                 onReset = {
                     ambienceVolume = 0.08f
                     sfxVolume = 0.48f
+                    qualityMode = RopeboundQualityMode.AUTO
                     gameAudio.setAmbienceVolume(ambienceVolume)
                     gameAudio.setSfxVolume(sfxVolume)
                 },
@@ -764,6 +775,7 @@ private fun RaceContent(
     onBrace: (Boolean) -> Unit,
     hudOpacity: Float,
     hudEditMode: Boolean,
+    qualityMode: RopeboundQualityMode = RopeboundQualityMode.AUTO,
     joystickPosition: Offset,
     jumpPosition: Offset,
     bracePosition: Offset = Offset(.89f, .78f),
@@ -835,6 +847,7 @@ private fun RaceContent(
             cameraOrbitPitch = (animatedBasePitch + orbitPitchOffset).coerceIn(-0.25f, 0.58f),
             liveControlFeed = liveControlFeed,
             previewMode = previewMode,
+            qualityMode = qualityMode,
             onCameraOrbitDrag = { dyaw, dpitch ->
                 orbitYawOffset = (orbitYawOffset + dyaw) % (2f * PI.toFloat())
                 orbitPitchOffset = (orbitPitchOffset + dpitch).coerceIn(-0.32f, 0.48f)

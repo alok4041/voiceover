@@ -327,11 +327,13 @@ internal fun GameSettingsOverlay(
     sfxVolume: Float,
     hudOpacity: Float,
     hudEditMode: Boolean,
+    qualityMode: RopeboundQualityMode = RopeboundQualityMode.AUTO,
     onSoundEnabledChange: (Boolean) -> Unit,
     onAmbienceVolumeChange: (Float) -> Unit,
     onSfxVolumeChange: (Float) -> Unit,
     onHudOpacityChange: (Float) -> Unit,
     onHudEditModeChange: (Boolean) -> Unit,
+    onQualityModeChange: (RopeboundQualityMode) -> Unit = {},
     onResetHud: () -> Unit,
     onReset: () -> Unit,
     onClose: () -> Unit,
@@ -367,6 +369,49 @@ internal fun GameSettingsOverlay(
                     val spacing = size.width / 5f
                     for (index in 1..4) drawCircle(PlaygroundTheme.TimberGold, 3.dp.toPx(), Offset(spacing * index, centerY))
                 }
+
+                Text("Graphics quality", color = PlaygroundTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Auto adapts to display refresh rate (1.6x vsync step-down, 1.15x step-up)",
+                    color = PlaygroundTheme.TextSecondary,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val modes = listOf(
+                        RopeboundQualityMode.AUTO to "Auto",
+                        RopeboundQualityMode.LOW to "Low",
+                        RopeboundQualityMode.MEDIUM to "Medium",
+                        RopeboundQualityMode.HIGH to "High",
+                    )
+                    for ((mode, label) in modes) {
+                        val selected = qualityMode == mode
+                        OutlinedButton(
+                            onClick = { onQualityModeChange(mode) },
+                            modifier = Modifier.weight(1f).height(38.dp).semantics { contentDescription = "Graphics quality $label" },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (selected) PlaygroundTheme.StoneCardSelected else PlaygroundTheme.StoneRow,
+                                contentColor = if (selected) PlaygroundTheme.TimberGold else PlaygroundTheme.TextPrimary,
+                            ),
+                            border = BorderStroke(
+                                width = if (selected) 1.5.dp else 1.dp,
+                                color = if (selected) PlaygroundTheme.MossEmerald else PlaygroundTheme.StoneBorder,
+                            ),
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
