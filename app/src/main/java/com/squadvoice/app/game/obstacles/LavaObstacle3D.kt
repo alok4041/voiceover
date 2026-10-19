@@ -11,7 +11,7 @@ internal fun buildLava(mesh: TriangleMesh, z1: Float, z2: Float, time: Float) {
     val pulse = 0.5f + 0.5f * sin(time * 3.6f)
 
     mesh.plane(-4.6f, 4.6f, near, far, -0.58f, Rgb(0.12f, 0.07f, 0.06f))
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val wallX = side * 3.92f
         mesh.box(Point3(wallX, -0.22f, (near + far) * 0.5f), 0.86f, 0.72f, canyonLength, Rgb(0.22f, 0.14f, 0.12f))
     }
@@ -34,15 +34,20 @@ internal fun buildLava(mesh: TriangleMesh, z1: Float, z2: Float, time: Float) {
             val b = near + canyonLength * (iz + 1) / nz
             val y00 = lavaLevel(x0, a); val y01 = lavaLevel(x0, b)
             val y11 = lavaLevel(x1, b); val y10 = lavaLevel(x1, a)
-            val p0 = Point3(x0, y00, a); val p1 = Point3(x0, y01, b)
-            val p2 = Point3(x1, y11, b); val p3 = Point3(x1, y10, a)
             val heatPulse = 0.5f + 0.5f * sin(time * 4f + ix * 0.8f + iz * 0.9f)
             val magmaColor = when {
                 heatPulse > 0.72f -> Rgb(1f, 0.86f + 0.12f * pulse, 0.24f)
                 heatPulse > 0.35f -> Rgb(1f, 0.42f + 0.12f * pulse, 0.06f)
                 else -> Rgb(0.86f, 0.16f, 0.04f)
             }
-            mesh.quad(p0, p1, p2, p3, magmaColor, emissive = true)
+            mesh.quad(
+                Point3(x0, y00, a),
+                Point3(x0, y01, b),
+                Point3(x1, y11, b),
+                Point3(x1, y10, a),
+                magmaColor,
+                emissive = true,
+            )
         }
     }
 

@@ -27,22 +27,14 @@ const RESPAWN_LANES = {
   64: { start: 64, end: 66.5 },
   80: { start: 80, end: 83.5 },
 };
-const PIT = { id: 'pit', label: 'Spike pit', start: 23, end: 27.5, leadIn: 4, action: 'jump', hint: 'Build speed and leap over the spikes.' };
-const BOULDER = { id: 'boulder', label: 'Path boulder', start: 36, end: 38.5, leadIn: 4, action: 'jump', hint: 'Jump over the big stone blocking the path.' };
-const RIVER_BRIDGE = { id: 'river-bridge', label: 'Rope bridge', start: 43, end: 49, leadIn: 0, action: 'run', hint: 'Keep running across the swaying bridge. Stop too long and it will break.' };
-const RIVER_GAP = { id: 'river-gap', label: 'Open river', start: 56, end: 61, leadIn: 3, action: 'jump', hint: 'Run and jump across the open river. Falling in sends your team back to its checkpoint.' };
-const WIND_TUNNEL = { id: 'wind-tunnel', label: 'Wind tunnel', start: 67, end: 73.5, leadIn: 3, action: 'brace', hint: 'Hold Brace together against the gusts.' };
-const LAVA = { id: 'lava', label: 'Lava flow', start: 84, end: 90.5, leadIn: 4, action: 'jump', hint: 'Leap over the lava flow; do not land in it.' };
-const HAZARDS = [
-  PIT,
-  BOULDER,
-  RIVER_BRIDGE,
-  RIVER_GAP,
-  WIND_TUNNEL,
-  LAVA,
-];
-// Keep every randomized hazard clear of checkpoint respawn lanes. Capacity is
-// the largest obstacle width that fits in the safe corridor at each center.
+const PIT = { id: 'pit', start: 23, end: 27.5, action: 'jump' };
+const BOULDER = { id: 'boulder', start: 36, end: 38.5, action: 'jump' };
+const RIVER_BRIDGE = { id: 'river-bridge', start: 43, end: 49, action: 'run' };
+const RIVER_GAP = { id: 'river-gap', start: 56, end: 61, action: 'jump' };
+const WIND_TUNNEL = { id: 'wind-tunnel', start: 67, end: 73.5, action: 'brace' };
+const LAVA = { id: 'lava', start: 84, end: 90.5, action: 'jump' };
+const HAZARDS = [PIT, BOULDER, RIVER_BRIDGE, RIVER_GAP, WIND_TUNNEL, LAVA];
+
 const COURSE_SLOTS = [
   { center: 14, capacity: 9.8 },
   { center: 26.25, capacity: 6.8 },
@@ -53,11 +45,6 @@ const COURSE_SLOTS = [
   { center: 91.75, capacity: 16 },
 ];
 
-/**
- * In-memory authoritative simulation rules for Ropebound.
- * Transport/authentication are deliberately separate so the game can later
- * be attached to an authenticated WebSocket without trusting client positions.
- */
 export class RopeboundGameCore {
   #rooms = new Map();
 
@@ -117,7 +104,6 @@ export class RopeboundGameCore {
       lastSeenAt: Date.now(),
       pingMs: null,
       crumblyEnteredAt: null,
-      finished: false,
     };
     room.players.set(playerId, player);
     if (!room.hostId) room.hostId = playerId;
@@ -289,7 +275,6 @@ export class RopeboundGameCore {
         player.lavaEnteredAt = null;
         player.waterEnteredAt = null;
         player.crumblyEnteredAt = null;
-        player.finished = false;
       });
     }
     room.phase = 'lobby';
@@ -307,7 +292,6 @@ export class RopeboundGameCore {
     return this.snapshot(room.code, identity);
   }
 
-  /** Accept controls only; never accept a position, score, checkpoint, or finish claim. */
   input(roomCode, identity, payload) {
     const room = this.#requireRoom(roomCode);
     const player = this.#requirePlayer(room, identity);
@@ -328,8 +312,6 @@ export class RopeboundGameCore {
     }
     const inputMagnitude = Math.hypot(move, steer);
     const inputScale = inputMagnitude > 1 ? 1 / inputMagnitude : 1;
-    // Coalesce burst packets cleanly without throwing rate-limit errors when network jitter batches frames;
-    // preserve rising jump pulses across coalesced packets.
     const preserveJumpPulse = (now - player.lastInputAt < 25) && player.input.jump && !player.wasJumpPressed;
     const jumpRequested = payload?.jump === true || preserveJumpPulse;
     player.input = {
@@ -339,8 +321,6 @@ export class RopeboundGameCore {
       jump: jumpRequested,
       brace: payload?.brace === true,
     };
-    // Trigger jump takeoff immediately on packet arrival if grounded so the player
-    // never waits up to a full server tick before leaving the ground.
     if (jumpRequested && player.grounded && !player.wasJumpPressed) {
       player.vy = JUMP_IMPULSE;
       player.grounded = false;
@@ -353,7 +333,6 @@ export class RopeboundGameCore {
     return true;
   }
 
-  /** Advance one server simulation step. Call at a fixed interval (suggested 20 Hz). */
   tick(roomCode, elapsedSeconds, now = Date.now()) {
     const room = this.#requireRoom(roomCode);
     if (room.phase !== 'race') return null;
@@ -362,7 +341,6 @@ export class RopeboundGameCore {
     for (const team of ['A', 'B']) {
       const members = teamPlayers(room, team);
       for (const player of members) {
-        const oldX = player.x;
         const input = now <= player.inputExpiresAt ? player.input : { move: 0, steer: 0, jump: false, brace: false };
         const isBracing = input.brace;
         const jumpPressed = input.jump && !player.wasJumpPressed;
@@ -394,8 +372,6 @@ export class RopeboundGameCore {
         const boulder = room.hazards.find((item) => item.id === BOULDER.id);
         const onBoulder = boulder && player.x >= boulder.start && player.x <= boulder.end;
         if (onBoulder && player.y < 2.4) {
-          // A low runner bumps off the boulder and must retry with a jump.
-          // While bump recovery is active, keep the runner safely before it.
           player.x = boulder.start - 1.6;
           if (now - player.lastBoulderBumpAt >= 900) {
             player.vx = -1.5;
@@ -468,7 +444,6 @@ export class RopeboundGameCore {
         } else {
           player.lavaEnteredAt = null;
         }
-
       }
       if (room.phase !== 'race') break;
       this.#enforceRope(room, team);
@@ -502,6 +477,7 @@ export class RopeboundGameCore {
     const room = this.#requireRoom(roomCode);
     const viewer = viewerIdentity ? this.#requirePlayer(room, viewerIdentity) : null;
     const ownTeam = viewer?.team;
+    const now = Date.now();
     const teams = {};
     for (const team of ['A', 'B']) {
       const members = teamPlayers(room, team);
@@ -511,38 +487,33 @@ export class RopeboundGameCore {
         : 0;
       const ropeTension = members.slice(1).reduce((maximum, player, index) => {
         const leader = members[index];
-        const horizontalGap = leader.x - player.x;
-        const verticalGap = leader.y - player.y;
-        const length = Math.hypot(horizontalGap, verticalGap);
+        const length = Math.hypot(leader.x - player.x, leader.y - player.y);
         return Math.max(maximum, length / MAX_ROPE_GAP);
       }, 0);
       teams[team] = {
         count: members.length,
         progress: Number(averageProgress.toFixed(3)),
         ropeTension: Number(clamp(ropeTension, 0, 1).toFixed(3)),
-        surgeCharge: Number(clamp(room.surge[team].chargeSeconds / SURGE_CHARGE_SECONDS, 0, 1).toFixed(3)),
-        surgeActive: room.surge[team].activeUntil > Date.now(),
-        surgeCount: room.surges[team],
+        surgeActive: room.surge[team].activeUntil > now,
         rescues: room.rescues[team],
-          players: room.phase !== 'race' || ownTeam === team ? members.map((player) => ({
-            id: player.id,
-            name: player.name,
-            ready: player.ready,
-            online: player.online,
-            progress: Number((player.x / COURSE_LENGTH).toFixed(3)),
-            lateralOffset: Number(player.lateralOffset.toFixed(3)),
-            height: Number(player.y.toFixed(2)),
-            velocity: Number(Math.hypot(player.vx, player.lateralVelocity).toFixed(2)),
-            grounded: player.grounded,
-            jumping: !player.grounded && player.y >= 0,
-            bracing: player.input.brace && player.inputExpiresAt >= Date.now(),
-            host: player.id === room.hostId,
-            pingMs: player.pingMs,
-          })) : [],
-          ropeLinks: room.phase !== 'race' || ownTeam === team ? Math.max(0, members.length - 1) : 0,
-          spectators: room.phase !== 'race' || ownTeam === team
-            ? spectators.map((player) => `${player.name} · ${player.online ? 'next round' : 'offline'}`)
-            : [],
+        players: room.phase !== 'race' || ownTeam === team ? members.map((player) => ({
+          id: player.id,
+          name: player.name,
+          ready: player.ready,
+          online: player.online,
+          progress: Number((player.x / COURSE_LENGTH).toFixed(3)),
+          lateralOffset: Number(player.lateralOffset.toFixed(3)),
+          height: Number(player.y.toFixed(2)),
+          velocity: Number(Math.hypot(player.vx, player.lateralVelocity).toFixed(2)),
+          grounded: player.grounded,
+          jumping: !player.grounded && player.y >= 0,
+          bracing: player.input.brace && player.inputExpiresAt >= now,
+          host: player.id === room.hostId,
+          pingMs: player.pingMs,
+        })) : [],
+        spectators: room.phase !== 'race' || ownTeam === team
+          ? spectators.map((player) => `${player.name} · ${player.online ? 'next round' : 'offline'}`)
+          : [],
       };
     }
     return {
@@ -556,23 +527,19 @@ export class RopeboundGameCore {
       checkpoints: { ...room.checkpoints },
       winner: room.winner,
       notice: room.notice,
-      hazard: getHazardHint(room, ownTeam),
-      effect: viewer && room.effect && room.effect.team === ownTeam && Date.now() - room.effect.at <= 1_200
+      effect: viewer && room.effect && room.effect.team === ownTeam && now - room.effect.at <= 1_200
         ? { id: room.effect.id, type: room.effect.type, progress: room.effect.progress }
         : null,
-      obstacles: room.phase === 'lobby' ? [] : room.hazards.map(({ id, label, action, hint, start, end }) => ({
+      obstacles: room.phase === 'lobby' ? [] : room.hazards.map(({ id, action, start, end }) => ({
         id,
-        label,
         action,
-        hint,
         start,
         end,
       })),
       durationSeconds: room.startedAt
-        ? Math.max(0, Math.floor(((room.finishedAt ?? Date.now()) - room.startedAt) / 1_000))
+        ? Math.max(0, Math.floor(((room.finishedAt ?? now) - room.startedAt) / 1_000))
         : 0,
       surges: { ...room.surges },
-      serverTime: Date.now(),
     };
   }
 
@@ -709,15 +676,11 @@ export class RopeboundGameCore {
       player.crumblyEnteredAt = null;
       player.lavaEnteredAt = null;
       player.waterEnteredAt = null;
-      player.finished = false;
     });
   }
 
   #enforceRope(room, team) {
     const members = teamPlayers(room, team);
-    // Revisit adjacent links because correcting one pair can stretch the next.
-    // Give airborne jumpers extra slack so jumping across pits, rivers, and lava
-    // never yanks a jumper backward mid-flight.
     for (let pass = 0; pass < members.length; pass += 1) {
       for (let index = 1; index < members.length; index += 1) {
         const leader = members[index - 1];
@@ -807,9 +770,6 @@ function buildRandomCourse() {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
   }
-  // Place the largest obstacles first so every obstacle fits. Choosing among
-  // valid safe corridors randomizes the route without spawning a team inside
-  // a hazard after it uses a checkpoint rescue.
   shuffled.sort((left, right) => (right.end - right.start) - (left.end - left.start));
   const availableSlots = [...COURSE_SLOTS];
   return shuffled.map((hazard) => {
@@ -822,24 +782,6 @@ function buildRandomCourse() {
     const start = Number((center - length / 2).toFixed(1));
     return { ...hazard, start, end: Number((start + length).toFixed(1)) };
   }).sort((left, right) => left.start - right.start);
-}
-
-function getHazardHint(room, team) {
-  if (!team) return null;
-  const members = teamPlayers(room, team);
-  // Warn for the leading runner so the whole team gets the cue before anyone
-  // reaches the obstacle.
-  const progress = members.length ? Math.max(...members.map((player) => player.x)) : 0;
-  const next = room.hazards.find((hazard) => hazard.end >= progress);
-  if (!next) return null;
-  return {
-    id: next.id,
-    label: next.label,
-    action: next.action,
-    hint: next.hint,
-    distance: Math.max(0, Number((next.start - progress).toFixed(1))),
-    active: progress >= next.start && progress <= next.end,
-  };
 }
 
 function formationPositions(checkpoint, count) {

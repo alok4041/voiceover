@@ -1,6 +1,5 @@
 package com.squadvoice.app.game
 
-import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -52,7 +51,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -525,21 +523,18 @@ internal fun RopeboundGameScreen(
                         }
                     }
                     val slowestMeters = (updated.minOfOrNull { it.progress } ?: 0f) * 100f
-                    val nextCp = listOf(8f, 19f, 30f, 40f, 50f, 64f, 80f).lastOrNull { slowestMeters >= it } ?: 8f
+                    val nextCp = CHECKPOINT_METERS.lastOrNull { slowestMeters >= it } ?: 8f
                     if (nextCp > updatedCheckpoint) {
                         updatedCheckpoint = nextCp
                         updatedNotice = "Checkpoint ${nextCp.toInt()}m reached!"
                     }
                     val maxGap = updated.zipWithNext().maxOfOrNull { (a, b) -> abs(a.progress - b.progress) * 100f } ?: 1.2f
                     val tension = (maxGap / 7.5f).coerceIn(0.12f, 0.92f)
-                    val surgeReady = forwardVelocity > 6.5f && !input.bracing
-                    val nextSurgeCharge = if (surgeReady) (team.surgeCharge + deltaSeconds * 0.45f).coerceAtMost(1f) else (team.surgeCharge - deltaSeconds * 0.25f).coerceAtLeast(0.15f)
                     return team.copy(
                         players = updated,
                         progress = updated.map { it.progress }.average().toFloat(),
                         ropeTension = tension,
-                        surgeCharge = nextSurgeCharge,
-                        surgeActive = nextSurgeCharge >= 0.95f,
+                        surgeActive = forwardVelocity > 8.5f && !input.bracing,
                     )
                 }
                 val nextTeam = if (current.viewerTeam == "B") advance(current.teamB) else advance(current.teamA)
@@ -567,7 +562,6 @@ internal fun RopeboundGameScreen(
         else -> null
     }
     val ownPlayer = ownTeam?.players?.firstOrNull { it.id == identity }
-    val currentControls = controls.value
 
     LaunchedEffect(snapshot?.phase, ownTeam?.ropeTension) {
         val isHigh = snapshot?.phase == "race" && (ownTeam?.ropeTension ?: 0f) >= .78f
@@ -593,8 +587,6 @@ internal fun RopeboundGameScreen(
                     onOpenGameSettings = ::openGameSettings,
                     onExit = ::exitGame,
                     viewerSpectating = state.viewerSpectating,
-                    localMoveInput = currentControls.move,
-                    localSteerInput = currentControls.steer,
                     liveControlFeed = liveControlFeed,
                     onStick = ::setStick,
                     hudOpacity = hudOpacity,
@@ -763,8 +755,6 @@ private fun RaceContent(
     microphoneEnabled: Boolean,
     onDismissError: () -> Unit,
     viewerSpectating: Boolean,
-    localMoveInput: Float = 0f,
-    localSteerInput: Float = 0f,
     liveControlFeed: RopeboundLiveControlFeed? = null,
     onToggleMicrophone: () -> Unit,
     onOpenGameSettings: () -> Unit,
@@ -811,25 +801,16 @@ private fun RaceContent(
         animationSpec = tween(durationMillis = 560),
         label = "camera-view-transition",
     )
-    val baseYawTarget = when (cameraMode) {
-        1 -> 0.68f
-        else -> 0f
-    }
-    val basePitchTarget = when (cameraMode) {
-        1 -> 0.14f
-        else -> 0.04f
-    }
     val animatedBaseYaw by animateFloatAsState(
-        targetValue = baseYawTarget,
+        targetValue = if (cameraMode == 1) 0.68f else 0f,
         animationSpec = tween(durationMillis = 550),
         label = "camera-yaw-transition",
     )
     val animatedBasePitch by animateFloatAsState(
-        targetValue = basePitchTarget,
+        targetValue = if (cameraMode == 1) 0.14f else 0.04f,
         animationSpec = tween(durationMillis = 550),
         label = "camera-pitch-transition",
     )
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val loadingAnimation = rememberInfiniteTransition(label = "playground-loading")
     val logoPulse by loadingAnimation.animateFloat(
         initialValue = .96f,
@@ -852,8 +833,6 @@ private fun RaceContent(
             cameraBlend = cameraBlend,
             cameraOrbitYaw = animatedBaseYaw + orbitYawOffset,
             cameraOrbitPitch = (animatedBasePitch + orbitPitchOffset).coerceIn(-0.25f, 0.58f),
-            localMoveInput = localMoveInput,
-            localSteerInput = localSteerInput,
             liveControlFeed = liveControlFeed,
             previewMode = previewMode,
             onCameraOrbitDrag = { dyaw, dpitch ->
@@ -919,7 +898,7 @@ private fun RaceContent(
                 )
             }
 
-            if (previewMode && gameUiVisible) {
+            if (previewMode) {
                 Text(
                     "3D PREVIEW · MOVE STICK TO TURN/RUN · DRAG SCREEN TO ORBIT 360°",
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 53.dp)
@@ -975,8 +954,6 @@ private fun RaceContent(
                     val screenWidthPx = with(density) { maxWidth.toPx() }
                     val screenHeightPx = with(density) { maxHeight.toPx() }
                     VirtualJoystick(
-                        move = 0f,
-                        steer = 0f,
                         position = joystickPosition,
                         opacity = hudOpacity,
                         editing = hudEditMode,

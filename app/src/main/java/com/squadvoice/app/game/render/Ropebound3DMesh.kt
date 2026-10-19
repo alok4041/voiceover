@@ -11,10 +11,10 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 internal const val COURSE_SCALE = 0.80f
+internal val SIDES = floatArrayOf(-1f, 1f)
 
 /**
  * Lock-free live control feed from touch inputs directly to the 60 FPS OpenGL thread.
- * Updating these fields does NOT trigger Compose UI recomposition, eliminating UI-thread lag.
  */
 internal class RopeboundLiveControlFeed {
     @Volatile var move: Float = 0f
@@ -24,8 +24,7 @@ internal class RopeboundLiveControlFeed {
 }
 
 /**
- * Lock-free 60 FPS render telemetry shared from the OpenGL thread to the 2D Nameplate overlay
- * so floating player nameplates and ping badges stay locked 1:1 above each 3D character's head.
+ * Lock-free 60 FPS render telemetry shared from the OpenGL thread to the 2D Nameplate overlay.
  */
 internal class RopeboundLiveRenderTelemetry {
     @Volatile var framesRendered: Long = 0L
@@ -83,9 +82,6 @@ internal data class Rgb(val r: Float, val g: Float, val b: Float) {
     )
 }
 
-/**
- * 3D local-to-world pose transform for articulated 3D character models and props.
- */
 internal class Pose3D(
     val originX: Float,
     val originY: Float,
@@ -104,22 +100,18 @@ internal class Pose3D(
     fun p(lx: Float, ly: Float, lz: Float): Point3 {
         val rx = lx * cr - ly * sr
         val ry = lx * sr + ly * cr
-        val rz = lz
-
-        val px = rx
-        val py = ry * cp - rz * sp
-        val pz = ry * sp + rz * cp
-
-        val wx = px * cy + pz * sy
-        val wy = py
-        val wz = -px * sy + pz * cy
-        return Point3(originX + wx, originY + wy, originZ + wz)
+        val py = ry * cp - lz * sp
+        val pz = ry * sp + lz * cp
+        return Point3(
+            originX + rx * cy + pz * sy,
+            originY + py,
+            originZ - rx * sy + pz * cy,
+        )
     }
 }
 
 /**
  * Zero-allocation primitive FloatArray 3D mesh builder.
- * Reuses a single primitive FloatArray across frames (0 boxed Float allocations, 0 GC pauses).
  * Stride = 9 floats (36 bytes): [x, y, z, nx, ny, nz, r, g, b].
  */
 internal class TriangleMesh {
@@ -261,7 +253,7 @@ internal class TriangleMesh {
     }
 
     fun sphere(center: Point3, radius: Float, color: Rgb, slices: Int = 8, rings: Int = 6, emissive: Boolean = false) {
-        ellipsoid(center, radius, radius, radius, color, slices, rings, smoothShading = true, emissive = emissive)
+        ellipsoid(center, radius, radius, radius, color, slices, rings, emissive)
     }
 
     fun ellipsoid(
@@ -272,7 +264,6 @@ internal class TriangleMesh {
         color: Rgb,
         slices: Int = 8,
         rings: Int = 6,
-        smoothShading: Boolean = true,
         emissive: Boolean = false,
     ) {
         ensureCapacity(rings * slices * 54)

@@ -39,15 +39,18 @@ internal fun buildRiver(
             val y00 = waterLevel(x0, a); val y01 = waterLevel(x0, b)
             val y11 = waterLevel(x1, b); val y10 = waterLevel(x1, a)
 
-            val p0 = Point3(x0, y00, a); val p1 = Point3(x0, y01, b)
-            val p2 = Point3(x1, y11, b); val p3 = Point3(x1, y10, a)
-
             val waveHeight = (y00 + y01 + y11 + y10) * 0.25f
             val crest = ((waveHeight + 0.64f) / 0.09f).coerceIn(-1f, 1f)
             val caustic = 0.5f + 0.5f * sin(ix * 0.42f - iz * 0.28f + time * 1.9f)
             val shimmer = 0.82f + (crest + 1f) * 0.07f + caustic * 0.09f
             val waterColor = Rgb(0.06f * shimmer, 0.44f * shimmer, 0.68f * shimmer)
-            mesh.quad(p0, p1, p2, p3, waterColor)
+            mesh.quad(
+                Point3(x0, y00, a),
+                Point3(x0, y01, b),
+                Point3(x1, y11, b),
+                Point3(x1, y10, a),
+                waterColor,
+            )
         }
     }
 
@@ -62,7 +65,8 @@ internal fun buildRiver(
         mesh.rod(Point3(startX, startY, z), Point3(endX, endY, z + 0.18f), 0.018f, sprayColor, 5, emissive = true)
     }
 
-    for ((bankIndex, bankZ) in listOf(near, far).withIndex()) {
+    for (bankIndex in 0..1) {
+        val bankZ = if (bankIndex == 0) near else far
         val landSign = if (bankIndex == 0) -1f else 1f
         val shoreColor = Rgb(0.66f, 0.58f, 0.42f)
         val shoreTopZ = bankZ + landSign * 0.85f
@@ -81,7 +85,6 @@ internal fun buildRiver(
             shoreColor,
         )
 
-        // Deep stone pier wall anchored all the way to the riverbed (-0.98f) so road ends never float
         mesh.box(Point3(0f, -0.48f, bankZ + landSign * 0.38f), 8.3f, 1.02f, 0.82f, Rgb(0.46f, 0.48f, 0.50f))
         mesh.box(Point3(0f, 0.04f, bankZ + landSign * 0.42f), 6.4f, 0.09f, 0.88f, Rgb(0.58f, 0.42f, 0.26f))
 
@@ -101,7 +104,8 @@ internal fun buildRiver(
 
         fun footstepsAt(progress: Float, radius: Float): Float {
             var flex = 0f
-            players.forEachIndexed { playerIndex, player ->
+            for (playerIndex in players.indices) {
+                val player = players[playerIndex]
                 val influence = (1f - abs(player.progress - progress) / radius).coerceIn(0f, 1f)
                 val footfall = if (player.velocity > 0.12f) {
                     sin(time * (7.8f + player.velocity.coerceAtMost(3f)) + playerIndex * PI.toFloat()) * 0.075f
@@ -125,21 +129,22 @@ internal fun buildRiver(
 
             mesh.bridgePlank(Point3(0f, plankY, z), bridgeWidth, 0.18f, riverLength / planks * 0.88f, roll, wood)
 
-            for (side in listOf(-1f, 1f)) {
+            for (side in SIDES) {
                 val railY = 0.92f + arch * 0.6f + wobble * 0.75f
                 mesh.rod(Point3(side * 2.76f, plankY + 0.08f, z), Point3(side * 2.76f, railY, z), 0.034f, Rgb(0.84f, 0.70f, 0.46f), 5)
             }
         }
 
-        for (endZ in listOf(near, far)) {
-            for (side in listOf(-1f, 1f)) {
+        for (endIdx in 0..1) {
+            val endZ = if (endIdx == 0) near else far
+            for (side in SIDES) {
                 val postX = side * 2.82f
                 mesh.box(Point3(postX, 0.42f, endZ), 0.36f, 2.48f, 0.36f, Rgb(0.44f, 0.25f, 0.13f))
                 mesh.box(Point3(postX, 1.70f, endZ), 0.44f, 0.16f, 0.44f, Rgb(0.62f, 0.38f, 0.20f))
             }
         }
 
-        for (side in listOf(-1f, 1f)) {
+        for (side in SIDES) {
             var previous = Point3(side * 2.82f, 1.52f, near)
             for (step in 1..18) {
                 val t = step / 18f

@@ -10,17 +10,15 @@ internal fun buildWindTunnel(mesh: TriangleMesh, z1: Float, z2: Float, time: Flo
     val near = min(z1, z2)
     val far = max(z1, z2)
     val span = (far - near).coerceAtLeast(0.5f)
-    // Ground-inlaid wind-zone chevron strips on the road surface (0 floating mid-air lines)
     for (strip in 0..3) {
         val z = near + span * ((strip + 0.5f) / 4f)
         val pulse = 0.55f + 0.45f * sin(time * 4.5f - strip * 0.9f)
         val stripColor = Rgb(0.24f + 0.26f * pulse, 0.82f + 0.14f * pulse, 0.94f)
         mesh.box(Point3(0f, 0.012f, z), 5.8f, 0.024f, 0.22f, stripColor)
     }
-    // Ground-anchored roadside wind turbine towers on left & right embankments
     for (marker in 0..2) {
         val z = near + span * (marker / 2f)
-        for (side in listOf(-1f, 1f)) {
+        for (side in SIDES) {
             val tx = side * 3.92f
             mesh.box(Point3(tx, -0.04f, z), 0.56f, 0.56f, 0.56f, Rgb(0.38f, 0.44f, 0.48f))
             mesh.rod(Point3(tx, 0.18f, z), Point3(tx, 2.28f, z), 0.13f, Rgb(0.76f, 0.82f, 0.86f), 7, 0.085f)

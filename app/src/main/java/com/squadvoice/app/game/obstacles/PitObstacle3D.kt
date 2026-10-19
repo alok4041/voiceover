@@ -29,16 +29,13 @@ internal fun buildPitHazard(mesh: TriangleMesh, z1: Float, z2: Float, time: Floa
             val x = -2.95f + i * 0.84f + (if (row % 2 == 0) 0f else 0.22f)
             if (x < 3.25f) {
                 val height = 0.86f + ((i * 7 + row * 3) % 3) * 0.14f
-                val baseY = -0.64f
-                val baseCol = Rgb(0.38f, 0.42f, 0.46f)
-                val tipCol = Rgb(0.84f, 0.88f, 0.92f)
-                mesh.cone(x, baseY, rowZ, 0.30f, height * 0.72f, baseCol, 6)
-                mesh.cone(x, baseY + height * 0.62f, rowZ, 0.15f, height * 0.44f, tipCol, 6)
+                mesh.cone(x, -0.64f, rowZ, 0.30f, height * 0.72f, Rgb(0.38f, 0.42f, 0.46f), 6)
+                mesh.cone(x, -0.64f + height * 0.62f, rowZ, 0.15f, height * 0.44f, Rgb(0.84f, 0.88f, 0.92f), 6)
             }
         }
     }
 
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val postX = side * 3.65f
         mesh.box(Point3(postX, 0.72f, near - 0.25f), 0.22f, 1.44f, 0.22f, Rgb(0.42f, 0.26f, 0.15f))
         mesh.sphere(Point3(postX, 1.54f, near - 0.25f), 0.16f, Rgb(1f, 0.76f + 0.2f * pitPulse, 0.22f), 7, 5, emissive = true)

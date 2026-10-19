@@ -36,7 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -108,8 +108,6 @@ internal fun GameSettingsButton(
 
 @Composable
 internal fun VirtualJoystick(
-    move: Float,
-    steer: Float,
     position: Offset,
     opacity: Float,
     editing: Boolean,
@@ -122,8 +120,8 @@ internal fun VirtualJoystick(
 ) {
     val density = LocalDensity.current
     val latestPosition by rememberUpdatedState(position)
-    var activeMove by remember { mutableStateOf(move) }
-    var activeSteer by remember { mutableStateOf(steer) }
+    var activeMove by remember { mutableFloatStateOf(0f) }
+    var activeSteer by remember { mutableFloatStateOf(0f) }
     val sizePx = with(density) { controlSize.toPx() }
 
     Canvas(
@@ -206,16 +204,14 @@ internal fun VirtualJoystick(
 
         fun arrow(dx: Float, dy: Float) {
             val point = Offset(center.x + dx * radius * .48f, center.y + dy * radius * .48f)
-            val ux = dx
-            val uy = dy
             val px = -dy
             val py = dx
-            val tip = Offset(point.x + ux * radius * .105f, point.y + uy * radius * .105f)
-            val tail = Offset(point.x - ux * radius * .105f, point.y - uy * radius * .105f)
+            val tip = Offset(point.x + dx * radius * .105f, point.y + dy * radius * .105f)
+            val tail = Offset(point.x - dx * radius * .105f, point.y - dy * radius * .105f)
             val ink = Color.White.copy(alpha = .78f)
             drawLine(ink, tail, tip, 2.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(ink, tip, Offset(tip.x - ux * radius * .08f + px * radius * .065f, tip.y - uy * radius * .08f + py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(ink, tip, Offset(tip.x - ux * radius * .08f - px * radius * .065f, tip.y - uy * radius * .08f - py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f + px * radius * .065f, tip.y - dy * radius * .08f + py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f - px * radius * .065f, tip.y - dy * radius * .08f - py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
         }
         arrow(0f, -1f)
         arrow(0f, 1f)
@@ -308,8 +304,9 @@ internal fun HudActionButton(
                         drawLine(c, Offset(cx - 3.dp.toPx(), cy + 8.dp.toPx()), Offset(cx + 3.dp.toPx(), cy + 8.dp.toPx()), stroke, cap = StrokeCap.Round)
                     }
                     GameHudIcon.Voice -> {
-                        val heights = listOf(4f, 8f, 12f, 6f, 10f, 5f)
-                        heights.forEachIndexed { index, height ->
+                        val heights = floatArrayOf(4f, 8f, 12f, 6f, 10f, 5f)
+                        for (index in heights.indices) {
+                            val height = heights[index]
                             val x = cx + (index - 2.5f) * 2.6.dp.toPx()
                             drawLine(c, Offset(x, cy - height.dp.toPx() / 2f), Offset(x, cy + height.dp.toPx() / 2f), stroke, cap = StrokeCap.Round)
                         }
@@ -509,10 +506,10 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
                         )
                         val headX = size.width * trackProgress
                         drawCircle(Color.White.copy(alpha = .92f), barHeight * .52f, Offset(headX.coerceAtMost(size.width - barHeight), size.height / 2f))
-                        val runnerColors = listOf(Color(0xFFB9A3FF), Color(0xFFFF927F), Color(0xFF62E2C9), Color(0xFFFFCB67))
-                        runnerColors.forEachIndexed { index, color ->
+                        val runnerColors = arrayOf(Color(0xFFB9A3FF), Color(0xFFFF927F), Color(0xFF62E2C9), Color(0xFFFFCB67))
+                        for (index in runnerColors.indices) {
                             val x = size.width * ((runnerTravel + index * .19f) % 1f)
-                            if (x < headX) drawCircle(color, barHeight * .28f, Offset(x, size.height / 2f))
+                            if (x < headX) drawCircle(runnerColors[index], barHeight * .28f, Offset(x, size.height / 2f))
                         }
                     }
                     Text(
@@ -551,7 +548,7 @@ internal fun HoldBraceButton(onBrace: (Boolean) -> Unit, modifier: Modifier = Mo
     )
 }
 
-internal enum class GameControlIcon { Left, Right, Up, Down, Jump, Brace }
+internal enum class GameControlIcon { Jump, Brace }
 
 @Composable
 internal fun GameActionButton(
@@ -580,9 +577,9 @@ internal fun GameControlButton(
     highlighted: Boolean = false,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
     onClick: () -> Unit = {},
-    onPressedChange: ((Boolean) -> Unit)? = null,
 ) {
     val active = pressed || highlighted
+    val shieldPath = remember { Path() }
     OutlinedButton(
         onClick = onClick,
         modifier = modifier.semantics {
@@ -601,35 +598,6 @@ internal fun GameControlButton(
             val cy = size.height / 2f
             val stroke = 2.7.dp.toPx()
             when (icon) {
-                GameControlIcon.Left, GameControlIcon.Right, GameControlIcon.Up, GameControlIcon.Down -> {
-                    val unit = when (icon) {
-                        GameControlIcon.Left -> Offset(-1f, 0f)
-                        GameControlIcon.Right -> Offset(1f, 0f)
-                        GameControlIcon.Up -> Offset(0f, -1f)
-                        else -> Offset(0f, 1f)
-                    }
-                    val perpendicular = Offset(-unit.y, unit.x)
-                    val arrowLength = 7.dp.toPx()
-                    val headLength = 4.dp.toPx()
-                    val headWidth = 4.dp.toPx()
-                    val start = Offset(cx - unit.x * arrowLength, cy - unit.y * arrowLength)
-                    val tip = Offset(cx + unit.x * arrowLength, cy + unit.y * arrowLength)
-                    drawLine(ink, start, tip, stroke, cap = StrokeCap.Round)
-                    drawLine(
-                        ink,
-                        tip,
-                        Offset(tip.x - unit.x * headLength + perpendicular.x * headWidth, tip.y - unit.y * headLength + perpendicular.y * headWidth),
-                        stroke,
-                        cap = StrokeCap.Round,
-                    )
-                    drawLine(
-                        ink,
-                        tip,
-                        Offset(tip.x - unit.x * headLength - perpendicular.x * headWidth, tip.y - unit.y * headLength - perpendicular.y * headWidth),
-                        stroke,
-                        cap = StrokeCap.Round,
-                    )
-                }
                 GameControlIcon.Jump -> {
                     drawLine(ink, Offset(cx, cy + 8.dp.toPx()), Offset(cx, cy - 7.dp.toPx()), stroke, cap = StrokeCap.Round)
                     drawLine(ink, Offset(cx, cy - 7.dp.toPx()), Offset(cx - 6.dp.toPx(), cy - 1.dp.toPx()), stroke, cap = StrokeCap.Round)
@@ -637,23 +605,21 @@ internal fun GameControlButton(
                     drawLine(ink, Offset(cx - 9.dp.toPx(), cy + 9.dp.toPx()), Offset(cx + 9.dp.toPx(), cy + 9.dp.toPx()), stroke, cap = StrokeCap.Round)
                 }
                 GameControlIcon.Brace -> {
-                    val shield = Path().apply {
-                        moveTo(cx, cy - 10.dp.toPx())
-                        lineTo(cx + 8.dp.toPx(), cy - 6.dp.toPx())
-                        lineTo(cx + 7.dp.toPx(), cy + 2.dp.toPx())
-                        quadraticTo(cx + 5.dp.toPx(), cy + 7.dp.toPx(), cx, cy + 10.dp.toPx())
-                        quadraticTo(cx - 5.dp.toPx(), cy + 7.dp.toPx(), cx - 7.dp.toPx(), cy + 2.dp.toPx())
-                        lineTo(cx - 8.dp.toPx(), cy - 6.dp.toPx())
-                        close()
-                    }
-                    drawPath(shield, ink, style = Stroke(width = stroke, cap = StrokeCap.Round))
+                    shieldPath.reset()
+                    shieldPath.moveTo(cx, cy - 10.dp.toPx())
+                    shieldPath.lineTo(cx + 8.dp.toPx(), cy - 6.dp.toPx())
+                    shieldPath.lineTo(cx + 7.dp.toPx(), cy + 2.dp.toPx())
+                    shieldPath.quadraticTo(cx + 5.dp.toPx(), cy + 7.dp.toPx(), cx, cy + 10.dp.toPx())
+                    shieldPath.quadraticTo(cx - 5.dp.toPx(), cy + 7.dp.toPx(), cx - 7.dp.toPx(), cy + 2.dp.toPx())
+                    shieldPath.lineTo(cx - 8.dp.toPx(), cy - 6.dp.toPx())
+                    shieldPath.close()
+                    drawPath(shieldPath, ink, style = Stroke(width = stroke, cap = StrokeCap.Round))
                     drawLine(ink, Offset(cx - 3.dp.toPx(), cy), Offset(cx - 0.5f.dp.toPx(), cy + 3.dp.toPx()), stroke, cap = StrokeCap.Round)
                     drawLine(ink, Offset(cx - 0.5f.dp.toPx(), cy + 3.dp.toPx()), Offset(cx + 4.dp.toPx(), cy - 3.dp.toPx()), stroke, cap = StrokeCap.Round)
                 }
             }
         }
     }
-    if (onPressedChange != null) LaunchedEffect(pressed) { onPressedChange(pressed) }
 }
 
 @Composable

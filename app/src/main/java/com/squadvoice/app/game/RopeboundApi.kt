@@ -1,21 +1,20 @@
 package com.squadvoice.app.game
 
 import android.os.SystemClock
+import com.squadvoice.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import com.squadvoice.app.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -47,9 +46,7 @@ internal data class RopeboundTeam(
     val count: Int,
     val progress: Float,
     val ropeTension: Float,
-    val surgeCharge: Float,
     val surgeActive: Boolean,
-    val surgeCount: Int,
     val rescues: Int,
     val players: List<RopeboundPlayer>,
     val spectators: List<String>,
@@ -57,19 +54,9 @@ internal data class RopeboundTeam(
 
 internal data class RopeboundObstacle(
     val id: String,
-    val label: String,
     val action: String,
-    val hint: String,
     val start: Float,
     val end: Float,
-)
-
-internal data class RopeboundHazard(
-    val label: String,
-    val action: String,
-    val hint: String,
-    val distance: Float,
-    val active: Boolean,
 )
 
 internal data class RopeboundEffect(
@@ -90,7 +77,6 @@ internal data class RopeboundSnapshot(
     val checkpointB: Float,
     val winner: String?,
     val notice: String,
-    val hazard: RopeboundHazard?,
     val effect: RopeboundEffect?,
     val obstacles: List<RopeboundObstacle>,
     val durationSeconds: Int,
@@ -114,9 +100,6 @@ internal class RopeboundApi(
 
     suspend fun join(roomCode: String, participantToken: String): RopeboundSnapshot =
         post("/games/join", roomCode, participantToken)
-
-    suspend fun state(roomCode: String, participantToken: String): RopeboundSnapshot =
-        request("GET", "/games/state?roomCode=${roomCode.encodeUrl()}", roomCode, participantToken)
 
     suspend fun heartbeat(roomCode: String, participantToken: String, pingMs: Int?): RopeboundSnapshot {
         val body = JSONObject()
@@ -224,17 +207,17 @@ internal class RopeboundApi(
         brace: Boolean = false,
     ): Boolean = realtimeSocket.get()?.send(
         JSONObject()
-                .put("type", "input")
-                .put("seq", seq)
-                .put("move", move.coerceIn(-1f, 1f))
-                .put("steer", steer.coerceIn(-1f, 1f))
-                .put("jump", jump)
-                .put("brace", brace)
-                .toString(),
+            .put("type", "input")
+            .put("seq", seq)
+            .put("move", move.coerceIn(-1f, 1f))
+            .put("steer", steer.coerceIn(-1f, 1f))
+            .put("jump", jump)
+            .put("brace", brace)
+            .toString(),
     ) == true
 
     suspend fun leave(roomCode: String, participantToken: String) {
-        requestJson("POST", "/games/leave", roomCode, participantToken, JSONObject().put("roomCode", roomCode))
+        requestJson("POST", "/games/leave", participantToken, JSONObject().put("roomCode", roomCode))
     }
 
     private suspend fun post(
@@ -244,21 +227,12 @@ internal class RopeboundApi(
         extra: JSONObject = JSONObject(),
     ): RopeboundSnapshot {
         extra.put("roomCode", roomCode)
-        return request("POST", path, roomCode, participantToken, extra)
+        return parseSnapshot(requestJson("POST", path, participantToken, extra))
     }
-
-    private suspend fun request(
-        method: String,
-        path: String,
-        roomCode: String,
-        participantToken: String,
-        body: JSONObject? = null,
-    ): RopeboundSnapshot = parseSnapshot(requestJson(method, path, roomCode, participantToken, body))
 
     private suspend fun requestJson(
         method: String,
         path: String,
-        roomCode: String,
         participantToken: String,
         body: JSONObject? = null,
     ): JSONObject = withContext(Dispatchers.IO) {
@@ -277,17 +251,14 @@ internal class RopeboundApi(
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            val json = runCatching { JSONObject(text) }
-                .getOrNull()
-            if (json == null) {
-                val message = when {
-                    status == 404 -> "The game API route was not found (HTTP 404). Render may need the latest game-server deployment."
-                    status in 500..599 -> "The game server is unavailable (HTTP $status). Try again shortly or check its Render deployment."
-                    status in 200..299 -> "The game server returned an unexpected response (HTTP $status). Check that Render has the latest game-server deployment."
-                    else -> "The game server returned a non-JSON response (HTTP $status). Check the Render game-server deployment."
-                }
-                throw IllegalStateException(message)
-            }
+            val json = runCatching { JSONObject(text) }.getOrNull()
+                ?: throw IllegalStateException(
+                    when {
+                        status == 404 -> "The game API route was not found (HTTP 404). Render may need the latest game-server deployment."
+                        status in 500..599 -> "The game server is unavailable (HTTP $status). Try again shortly or check its Render deployment."
+                        else -> "The game server returned an unexpected response (HTTP $status)."
+                    },
+                )
             if (status !in 200..299) {
                 throw IllegalStateException(
                     json.optString("error").takeIf(String::isNotBlank)
@@ -303,7 +274,6 @@ internal class RopeboundApi(
     private fun parseSnapshot(json: JSONObject): RopeboundSnapshot {
         val teams = json.getJSONObject("teams")
         val checkpoints = json.optJSONObject("checkpoints") ?: JSONObject()
-        val hazardJson = json.optJSONObject("hazard")
         val effectJson = json.optJSONObject("effect")
         val obstaclesJson = json.optJSONArray("obstacles")
         val obstacles = buildList {
@@ -313,9 +283,7 @@ internal class RopeboundApi(
                     add(
                         RopeboundObstacle(
                             id = obstacle.optString("id"),
-                            label = obstacle.optString("label", "Obstacle"),
                             action = obstacle.optString("action"),
-                            hint = obstacle.optString("hint"),
                             start = obstacle.optDouble("start").toFloat(),
                             end = obstacle.optDouble("end").toFloat(),
                         ),
@@ -323,6 +291,7 @@ internal class RopeboundApi(
                 }
             }
         }
+        val surges = json.optJSONObject("surges")
         return RopeboundSnapshot(
             phase = json.optString("phase", "lobby"),
             teamA = parseTeam(teams.optJSONObject("A") ?: JSONObject()),
@@ -335,15 +304,6 @@ internal class RopeboundApi(
             checkpointB = checkpoints.optDouble("B", 8.0).toFloat(),
             winner = json.optString("winner").takeIf { it == "A" || it == "B" || it == "tie" },
             notice = json.optString("notice"),
-            hazard = hazardJson?.let {
-                RopeboundHazard(
-                    label = it.optString("label", "Obstacle"),
-                    action = it.optString("action"),
-                    hint = it.optString("hint"),
-                    distance = it.optDouble("distance").toFloat(),
-                    active = it.optBoolean("active"),
-                )
-            },
             effect = effectJson?.let {
                 RopeboundEffect(
                     id = it.optLong("id"),
@@ -353,8 +313,8 @@ internal class RopeboundApi(
             },
             obstacles = obstacles,
             durationSeconds = json.optInt("durationSeconds"),
-            surgesA = json.optJSONObject("surges")?.optInt("A") ?: 0,
-            surgesB = json.optJSONObject("surges")?.optInt("B") ?: 0,
+            surgesA = surges?.optInt("A") ?: 0,
+            surgesB = surges?.optInt("B") ?: 0,
         )
     }
 
@@ -390,9 +350,7 @@ internal class RopeboundApi(
             count = json.optInt("count", players.size),
             progress = json.optDouble("progress").toFloat(),
             ropeTension = json.optDouble("ropeTension").toFloat(),
-            surgeCharge = json.optDouble("surgeCharge").toFloat(),
             surgeActive = json.optBoolean("surgeActive"),
-            surgeCount = json.optInt("surgeCount"),
             rescues = json.optInt("rescues", 3),
             players = players,
             spectators = json.optJSONArray("spectators")?.let { list ->

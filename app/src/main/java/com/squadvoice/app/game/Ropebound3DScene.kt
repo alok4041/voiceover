@@ -49,8 +49,6 @@ internal fun Ropebound3DScene(
     cameraBlend: Float,
     cameraOrbitYaw: Float = 0f,
     cameraOrbitPitch: Float = 0f,
-    localMoveInput: Float = 0f,
-    localSteerInput: Float = 0f,
     liveControlFeed: RopeboundLiveControlFeed? = null,
     previewMode: Boolean = false,
     onCameraOrbitDrag: ((Float, Float) -> Unit)? = null,
@@ -75,8 +73,6 @@ internal fun Ropebound3DScene(
                 cameraBlend = cameraBlend,
                 orbitYaw = activeYaw,
                 orbitPitch = activePitch,
-                localMoveInput = localMoveInput,
-                localSteerInput = localSteerInput,
                 liveControlFeed = liveControlFeed,
                 previewMode = previewMode,
             ),
@@ -245,8 +241,6 @@ private data class Ropebound3DState(
     val cameraBlend: Float,
     val orbitYaw: Float = 0f,
     val orbitPitch: Float = 0f,
-    val localMoveInput: Float = 0f,
-    val localSteerInput: Float = 0f,
     val liveControlFeed: RopeboundLiveControlFeed? = null,
     val previewMode: Boolean = false,
 )
@@ -271,7 +265,7 @@ private class Ropebound3DRenderer(
 ) : GLSurfaceView.Renderer {
     @Volatile
     private var scene = Ropebound3DState(
-        RopeboundTeam(0, 0f, 0f, 0f, false, 0, 3, emptyList(), emptyList()),
+        RopeboundTeam(0, 0f, 0f, false, 3, emptyList(), emptyList()),
         "",
         emptyList(),
         0f,
@@ -283,7 +277,6 @@ private class Ropebound3DRenderer(
     private var colorHandle = 0
     private var mvpHandle = 0
     private var eyePosHandle = 0
-    private var timeHandle = 0
     private var width = 1
     private var height = 1
     private val projection = FloatArray(16)
@@ -301,6 +294,11 @@ private class Ropebound3DRenderer(
     private var predLateralVel = 0f
     private var vertexBuffer: FloatBuffer? = null
     private val runnerTrackers = HashMap<String, RunnerMotionTracker>()
+    private val cutStarts = FloatArray(12)
+    private val cutEnds = FloatArray(12)
+    private val riverStarts = FloatArray(8)
+    private val riverEnds = FloatArray(8)
+    private val anchorPoints = arrayOfNulls<Point3>(12)
 
     fun submit(next: Ropebound3DState) {
         scene = next
@@ -331,7 +329,6 @@ private class Ropebound3DRenderer(
         val fragmentShader = """
             precision mediump float;
             uniform vec3 uEyePos;
-            uniform float uTime;
             varying vec3 vWorldPos;
             varying vec3 vNormal;
             varying vec3 vColor;
@@ -381,7 +378,6 @@ private class Ropebound3DRenderer(
         colorHandle = GLES20.glGetAttribLocation(program, "aColor")
         mvpHandle = GLES20.glGetUniformLocation(program, "uMvp")
         eyePosHandle = GLES20.glGetUniformLocation(program, "uEyePos")
-        timeHandle = GLES20.glGetUniformLocation(program, "uTime")
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -400,8 +396,8 @@ private class Ropebound3DRenderer(
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         val current = scene
         val feed = current.liveControlFeed
-        val liveMove = feed?.move ?: current.localMoveInput
-        val liveSteer = feed?.steer ?: current.localSteerInput
+        val liveMove = feed?.move ?: 0f
+        val liveSteer = feed?.steer ?: 0f
         val liveBracing = feed?.bracing ?: false
         val jumpStartedMs = feed?.jumpStartedAtMs ?: 0L
         val jumpAgeSec = if (jumpStartedMs == 0L) Float.POSITIVE_INFINITY else (SystemClock.elapsedRealtime() - jumpStartedMs) / 1_000f
@@ -521,7 +517,6 @@ private class Ropebound3DRenderer(
         GLES20.glUseProgram(program)
         GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
         GLES20.glUniform3f(eyePosHandle, eyeX, eyeY, eyeZ)
-        GLES20.glUniform1f(timeHandle, now)
 
         val strideBytes = 9 * 4
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -557,26 +552,58 @@ private class Ropebound3DRenderer(
     ) {
         fun zAt(distanceMeters: Float) = (distanceMeters - cameraProgress * 100f) * COURSE_SCALE
 
-        val cuts = state.obstacles
-            .filter { it.id in setOf("pit", "river-bridge", "river-gap", "lava") }
-            .map { zAt(it.start) to zAt(it.end) }
-            .filter { it.second > -18f && it.first < 96f }
-            .sortedBy { it.first }
+        var cutCount = 0
+        var riverCount = 0
+        for (i in state.obstacles.indices) {
+            val obs = state.obstacles[i]
+            val id = obs.id
+            val s = zAt(obs.start)
+            val e = zAt(obs.end)
+            if (id == "pit" || id == "river-bridge" || id == "river-gap" || id == "lava") {
+                if (e > -18f && s < 96f && cutCount < cutStarts.size) {
+                    cutStarts[cutCount] = s
+                    cutEnds[cutCount] = e
+                    cutCount++
+                }
+            }
+            if ((id == "river-bridge" || id == "river-gap") && riverCount < riverStarts.size) {
+                val rs = s.coerceAtLeast(-26f)
+                val re = e.coerceAtMost(106f)
+                if (re > rs) {
+                    riverStarts[riverCount] = rs
+                    riverEnds[riverCount] = re
+                    riverCount++
+                }
+            }
+        }
+
+        // Insertion sort primitive arrays (<= 6 elements, 0 allocations)
+        for (i in 1 until cutCount) {
+            val ks = cutStarts[i]; val ke = cutEnds[i]
+            var j = i - 1
+            while (j >= 0 && cutStarts[j] > ks) {
+                cutStarts[j + 1] = cutStarts[j]; cutEnds[j + 1] = cutEnds[j]
+                j--
+            }
+            cutStarts[j + 1] = ks; cutEnds[j + 1] = ke
+        }
+        for (i in 1 until riverCount) {
+            val ks = riverStarts[i]; val ke = riverEnds[i]
+            var j = i - 1
+            while (j >= 0 && riverStarts[j] > ks) {
+                riverStarts[j + 1] = riverStarts[j]; riverEnds[j + 1] = riverEnds[j]
+                j--
+            }
+            riverStarts[j + 1] = ks; riverEnds[j + 1] = ke
+        }
 
         drawMountainVista(mesh, time)
 
-        val riverSections = state.obstacles
-            .filter { it.id == "river-bridge" || it.id == "river-gap" }
-            .map { obstacle ->
-                zAt(obstacle.start).coerceAtLeast(-26f) to
-                    zAt(obstacle.end).coerceAtMost(106f)
-            }
-            .filter { it.second > it.first }
-            .sortedBy { it.first }
-
         fun drawTerrainLayer(y: Float, color: Rgb) {
             var cursor = -26f
-            riverSections.forEach { (riverNear, riverFar) ->
+            for (i in 0 until riverCount) {
+                val riverNear = riverStarts[i]
+                val riverFar = riverEnds[i]
                 if (riverNear > cursor) mesh.plane(-44f, 44f, cursor, riverNear, y, color)
                 mesh.plane(-44f, -23f, riverNear, riverFar, y, color)
                 mesh.plane(23f, 44f, riverNear, riverFar, y, color)
@@ -587,12 +614,12 @@ private class Ropebound3DRenderer(
         drawTerrainLayer(-0.30f, Rgb(0.24f, 0.52f, 0.22f))
         drawTerrainLayer(-0.29f, Rgb(0.32f, 0.62f, 0.26f))
 
-        drawValleySideHills(mesh, cameraProgress, time, riverSections)
+        drawValleySideHills(mesh, cameraProgress, riverCount, riverStarts, riverEnds)
 
         var roadZ = -20f
-        cuts.forEach { (start, end) ->
-            val boundedStart = start.coerceIn(-20f, 96f)
-            val boundedEnd = end.coerceIn(-20f, 96f)
+        for (i in 0 until cutCount) {
+            val boundedStart = cutStarts[i].coerceIn(-20f, 96f)
+            val boundedEnd = cutEnds[i].coerceIn(-20f, 96f)
             if (boundedStart > roadZ) drawTrail(mesh, roadZ, boundedStart)
             roadZ = max(roadZ, boundedEnd)
         }
@@ -602,18 +629,19 @@ private class Ropebound3DRenderer(
             val side = if (tree % 2 == 0) -1f else 1f
             val x = side * (6.6f + (tree % 5) * 2.15f)
             val z = -10f + (tree * 5.6f + cameraProgress * COURSE_SCALE * 0.35f) % 78f
-            if (riverSections.any { z in (it.first - 1.2f)..(it.second + 1.2f) }) continue
+            if (overlapsRiver(z, 1.2f, riverCount, riverStarts, riverEnds)) continue
             val species = tree % 3
             val scale = 0.86f + (tree % 4) * 0.14f
             drawStylizedTree(mesh, x, z, species, scale, time)
         }
 
-        drawMeadows(mesh, cameraProgress, time, riverSections)
+        drawMeadows(mesh, cameraProgress, time, riverCount, riverStarts, riverEnds)
 
-        state.obstacles.forEach { obstacle ->
+        for (i in state.obstacles.indices) {
+            val obstacle = state.obstacles[i]
             val z1 = zAt(obstacle.start)
             val z2 = zAt(obstacle.end)
-            if (max(z1, z2) < -22f || min(z1, z2) > 105f) return@forEach
+            if (max(z1, z2) < -22f || min(z1, z2) > 105f) continue
             when (obstacle.id) {
                 "pit" -> buildPitHazard(mesh, z1, z2, time)
                 "boulder" -> buildBoulderHazard(mesh, z1, z2, time)
@@ -625,7 +653,7 @@ private class Ropebound3DRenderer(
             }
         }
 
-        for (checkpoint in listOf(8f, 19f, 30f, 40f, 50f, 64f, 80f)) {
+        for (checkpoint in CHECKPOINT_METERS) {
             val z = zAt(checkpoint)
             if (z !in -18f..95f) continue
             val reached = cameraProgress * 100f >= checkpoint
@@ -637,8 +665,8 @@ private class Ropebound3DRenderer(
             drawFinishArch(mesh, finishZ, time)
         }
 
-        val anchorPoints = ArrayList<Point3>(state.team.players.size)
-        for (playerIndex in state.team.players.indices) {
+        val playerCount = min(state.team.players.size, anchorPoints.size)
+        for (playerIndex in 0 until playerCount) {
             val rawPlayer = state.team.players[playerIndex]
             val isLocalPlayer = rawPlayer.id == state.viewerIdentity
             val tracker = runnerTrackers.getOrPut(rawPlayer.id.ifBlank { "runner_$playerIndex" }) { RunnerMotionTracker() }
@@ -667,26 +695,15 @@ private class Ropebound3DRenderer(
             val z = (tracker.renderProgress - cameraProgress) * 100f * COURSE_SCALE
             val x = (playerIndex - (state.team.players.size - 1) / 2f) * 1.22f + tracker.renderLat.coerceIn(-1.25f, 1.25f)
             val jump = (tracker.renderHeight / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
-            val effectivePlayer = if (isLocalPlayer) {
-                rawPlayer.copy(
-                    progress = tracker.renderProgress,
-                    lateralOffset = tracker.renderLat,
-                    height = tracker.renderHeight,
-                    grounded = !inLocalJump && rawPlayer.grounded,
-                    jumping = inLocalJump || rawPlayer.jumping,
-                    bracing = liveBracing || rawPlayer.bracing,
-                )
-            } else {
-                rawPlayer.copy(
-                    progress = tracker.renderProgress,
-                    lateralOffset = tracker.renderLat,
-                    height = tracker.renderHeight,
-                )
-            }
 
-            val harnessAnchor = drawRunner(
+            anchorPoints[playerIndex] = drawRunner(
                 mesh = mesh,
-                player = effectivePlayer,
+                playerId = rawPlayer.id,
+                playerVelocity = rawPlayer.velocity,
+                renderProgress = tracker.renderProgress,
+                grounded = if (isLocalPlayer) !inLocalJump && rawPlayer.grounded else rawPlayer.grounded,
+                jumping = if (isLocalPlayer) inLocalJump || rawPlayer.jumping else rawPlayer.jumping,
+                bracing = if (isLocalPlayer) liveBracing || rawPlayer.bracing else rawPlayer.bracing,
                 tracker = tracker,
                 x = x,
                 z = z,
@@ -699,13 +716,13 @@ private class Ropebound3DRenderer(
                 time = time,
                 dt = dt,
             )
-            anchorPoints += harnessAnchor
         }
-        telemetry.playerCount = state.team.players.size
+        telemetry.playerCount = playerCount
 
         drawSquadTensionRope(
             mesh = mesh,
             anchorPoints = anchorPoints,
+            anchorCount = playerCount,
             ropeTension = state.team.ropeTension,
             surgeActive = state.team.surgeActive,
             time = time,

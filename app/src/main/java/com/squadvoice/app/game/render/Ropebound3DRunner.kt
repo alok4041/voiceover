@@ -8,6 +8,30 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
 
+private val RUNNER_SUIT_PALETTE = arrayOf(
+    Rgb(0.46f, 0.34f, 0.90f),
+    Rgb(0.90f, 0.30f, 0.28f),
+    Rgb(0.16f, 0.72f, 0.60f),
+    Rgb(0.95f, 0.56f, 0.16f),
+    Rgb(0.24f, 0.56f, 0.92f),
+)
+
+private val RUNNER_HAIR_PALETTE = arrayOf(
+    Rgb(0.14f, 0.10f, 0.08f),
+    Rgb(0.36f, 0.18f, 0.09f),
+    Rgb(0.76f, 0.42f, 0.16f),
+    Rgb(0.16f, 0.20f, 0.26f),
+)
+
+private val RUNNER_SKIN_PALETTE = arrayOf(
+    Rgb(0.96f, 0.72f, 0.54f),
+    Rgb(0.80f, 0.52f, 0.36f),
+    Rgb(0.98f, 0.78f, 0.62f),
+    Rgb(0.58f, 0.36f, 0.26f),
+)
+
+private val PANTS_COLOR = Rgb(0.18f, 0.24f, 0.32f)
+
 internal data class RunnerMotionTracker(
     var lastX: Float = 0f,
     var lastZ: Float = 0f,
@@ -23,7 +47,12 @@ internal data class RunnerMotionTracker(
 
 internal fun drawRunner(
     mesh: TriangleMesh,
-    player: RopeboundPlayer,
+    playerId: String,
+    playerVelocity: Float,
+    renderProgress: Float,
+    grounded: Boolean,
+    jumping: Boolean,
+    bracing: Boolean,
     tracker: RunnerMotionTracker,
     x: Float,
     z: Float,
@@ -36,7 +65,7 @@ internal fun drawRunner(
     time: Float,
     dt: Float,
 ): Point3 {
-    val worldZ = player.progress * 100f * COURSE_SCALE
+    val worldZ = renderProgress * 100f * COURSE_SCALE
     val vx: Float
     val vz: Float
     if (!tracker.initialized) {
@@ -55,8 +84,8 @@ internal fun drawRunner(
     val inputSpeed = if (isLocalPlayer) hypot(localSteerInput, localMoveInput) else 0f
     val effectiveVx = if (isLocalPlayer && inputSpeed > 0.10f) localSteerInput * 5.2f else vx
     val effectiveVz = if (isLocalPlayer && inputSpeed > 0.10f) localMoveInput * 9.5f else vz
-    val planarSpeed = max(hypot(effectiveVx, effectiveVz), player.velocity * 0.65f)
-    val isMoving = planarSpeed > 0.20f && !player.bracing
+    val planarSpeed = max(hypot(effectiveVx, effectiveVz), playerVelocity * 0.65f)
+    val isMoving = planarSpeed > 0.20f && !bracing
 
     val targetYaw = when {
         isLocalPlayer && inputSpeed > 0.10f -> atan2(localSteerInput, localMoveInput)
@@ -71,8 +100,8 @@ internal fun drawRunner(
     tracker.smoothYaw += angleDiff * (dt * 14f).coerceIn(0.12f, 0.55f)
 
     val targetLean = when {
-        player.bracing -> -0.18f
-        player.jumping -> 0.10f
+        bracing -> -0.18f
+        jumping -> 0.10f
         isMoving -> (planarSpeed / 10f).coerceIn(0.06f, 0.24f)
         else -> 0f
     }
@@ -80,45 +109,25 @@ internal fun drawRunner(
     tracker.smoothLean += (targetLean - tracker.smoothLean) * 0.32f
     tracker.smoothBank += (targetBank - tracker.smoothBank) * 0.32f
 
-    if (isMoving && player.grounded) {
+    if (isMoving && grounded) {
         tracker.animDistance += planarSpeed * dt * 2.2f
     }
 
-    val palette = listOf(
-        Rgb(0.46f, 0.34f, 0.90f),
-        Rgb(0.90f, 0.30f, 0.28f),
-        Rgb(0.16f, 0.72f, 0.60f),
-        Rgb(0.95f, 0.56f, 0.16f),
-        Rgb(0.24f, 0.56f, 0.92f),
-    )
-    val suit = palette[index % palette.size]
-    val pantsColor = Rgb(0.18f, 0.24f, 0.32f)
-    val hairPalette = listOf(
-        Rgb(0.14f, 0.10f, 0.08f),
-        Rgb(0.36f, 0.18f, 0.09f),
-        Rgb(0.76f, 0.42f, 0.16f),
-        Rgb(0.16f, 0.20f, 0.26f),
-    )
-    val skinPalette = listOf(
-        Rgb(0.96f, 0.72f, 0.54f),
-        Rgb(0.80f, 0.52f, 0.36f),
-        Rgb(0.98f, 0.78f, 0.62f),
-        Rgb(0.58f, 0.36f, 0.26f),
-    )
-    val styleSeed = player.id.hashCode() and Int.MAX_VALUE
-    val hair = hairPalette[styleSeed % hairPalette.size]
-    val skin = skinPalette[(styleSeed / 3) % skinPalette.size]
-    val packColor = palette[(index + 2) % palette.size].shade(0.88f)
+    val suit = RUNNER_SUIT_PALETTE[index % RUNNER_SUIT_PALETTE.size]
+    val styleSeed = playerId.hashCode() and Int.MAX_VALUE
+    val hair = RUNNER_HAIR_PALETTE[styleSeed % RUNNER_HAIR_PALETTE.size]
+    val skin = RUNNER_SKIN_PALETTE[(styleSeed / 3) % RUNNER_SKIN_PALETTE.size]
+    val packColor = RUNNER_SUIT_PALETTE[(index + 2) % RUNNER_SUIT_PALETTE.size].shade(0.88f)
 
     val runPhase = tracker.animDistance + time * (if (isMoving) 7.5f else 0f) + index * 0.8f
     val stride = when {
-        player.jumping -> 0.42f
-        isMoving && player.grounded -> sin(runPhase) * (0.34f + (planarSpeed / 18f).coerceAtMost(0.22f))
+        jumping -> 0.42f
+        isMoving && grounded -> sin(runPhase) * (0.34f + (planarSpeed / 18f).coerceAtMost(0.22f))
         else -> 0f
     }
     val bob = when {
-        player.bracing -> -0.14f
-        isMoving && player.grounded -> abs(sin(runPhase)) * 0.075f
+        bracing -> -0.14f
+        isMoving && grounded -> abs(sin(runPhase)) * 0.075f
         else -> sin(time * 2.4f + index) * 0.022f
     }
     val baseY = jump + bob
@@ -143,7 +152,7 @@ internal fun drawRunner(
         }
     }
 
-    if (isMoving && player.grounded) {
+    if (isMoving && grounded) {
         for (puff in 0..1) {
             val puffAge = (time * 3.8f + index * 0.5f + puff * 0.5f) % 1f
             val puffR = 0.08f * (1f - puffAge * 0.65f)
@@ -174,11 +183,11 @@ internal fun drawRunner(
         roll = tracker.smoothBank,
     )
 
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val legPhase = if (side < 0f) stride else -stride
         val kneeLift = when {
-            player.jumping -> 0.22f
-            player.bracing -> 0.14f
+            jumping -> 0.22f
+            bracing -> 0.14f
             isMoving -> max(0f, -legPhase) * 0.35f
             else -> 0f
         }
@@ -186,34 +195,34 @@ internal fun drawRunner(
         val knee = pose.p(
             side * 0.175f,
             0.35f + kneeLift * 0.45f,
-            legPhase * 0.48f + (if (player.jumping || player.bracing) 0.14f else 0.05f),
+            legPhase * 0.48f + (if (jumping || bracing) 0.14f else 0.05f),
         )
         val ankle = pose.p(
             side * 0.18f,
             0.10f + kneeLift * 0.75f,
-            legPhase * 0.85f - (if (player.jumping) 0.12f else 0f),
+            legPhase * 0.85f - (if (jumping) 0.12f else 0f),
         )
         val bootToe = pose.p(
             side * 0.18f,
             0.06f + kneeLift * 0.75f,
-            legPhase * 0.85f + 0.16f - (if (player.jumping) 0.10f else 0f),
+            legPhase * 0.85f + 0.16f - (if (jumping) 0.10f else 0f),
         )
         val bootSole = pose.p(
             side * 0.18f,
             0.025f + kneeLift * 0.75f,
-            legPhase * 0.85f + 0.06f - (if (player.jumping) 0.10f else 0f),
+            legPhase * 0.85f + 0.06f - (if (jumping) 0.10f else 0f),
         )
 
-        mesh.rod(hip, knee, 0.108f, pantsColor, 7, 0.092f)
+        mesh.rod(hip, knee, 0.108f, PANTS_COLOR, 7, 0.092f)
         mesh.sphere(knee, 0.096f, Rgb(0.28f, 0.34f, 0.42f), 7, 5)
-        mesh.rod(knee, ankle, 0.088f, pantsColor.shade(1.06f), 7, 0.074f)
+        mesh.rod(knee, ankle, 0.088f, PANTS_COLOR.shade(1.06f), 7, 0.074f)
         mesh.sphere(ankle, 0.082f, Rgb(0.88f, 0.84f, 0.74f), 6, 4)
         mesh.rod(ankle, bootToe, 0.095f, suit.shade(0.84f), 7, 0.085f)
         mesh.sphere(bootToe, 0.088f, Rgb(0.24f, 0.28f, 0.34f), 7, 5)
         mesh.sphere(bootSole, 0.092f, Rgb(0.92f, 0.84f, 0.64f), 7, 4)
     }
 
-    mesh.orientedEllipsoid(pose, 0f, 0.64f, 0f, 0.25f, 0.14f, 0.19f, pantsColor.shade(0.92f), 8, 5)
+    mesh.orientedEllipsoid(pose, 0f, 0.64f, 0f, 0.25f, 0.14f, 0.19f, PANTS_COLOR.shade(0.92f), 8, 5)
     mesh.orientedEllipsoid(pose, 0f, 0.98f, 0f, 0.28f, 0.34f, 0.21f, suit, 9, 6)
     mesh.orientedBox(pose, 0f, 0.96f, 0f, 0.50f, 0.52f, 0.34f, suit.shade(0.92f))
     mesh.orientedBox(pose, 0f, 0.98f, 0.165f, 0.15f, 0.48f, 0.05f, Rgb(0.96f, 0.92f, 0.82f))
@@ -232,7 +241,7 @@ internal fun drawRunner(
         Rgb(0.92f, 0.76f, 0.44f),
         7,
     )
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         mesh.rod(
             pose.p(side * 0.18f, 1.26f, -0.15f),
             pose.p(side * 0.19f, 1.26f, 0.15f),
@@ -249,22 +258,22 @@ internal fun drawRunner(
         )
     }
 
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val armSwing = when {
-            player.jumping -> 0.48f
-            player.bracing -> -0.22f
+            jumping -> 0.48f
+            bracing -> -0.22f
             isMoving -> if (side < 0f) -stride * 0.95f else stride * 0.95f
             else -> sin(time * 2.2f + index + side) * 0.04f
         }
         val shoulder = pose.p(side * 0.30f, 1.18f, 0f)
         val elbow = pose.p(
-            side * (0.38f + (if (player.bracing) 0.08f else 0f)),
-            0.95f + (if (player.jumping) 0.18f else abs(armSwing) * 0.12f),
+            side * (0.38f + (if (bracing) 0.08f else 0f)),
+            0.95f + (if (jumping) 0.18f else abs(armSwing) * 0.12f),
             armSwing * 0.42f - 0.06f,
         )
         val hand = pose.p(
-            side * (0.40f + (if (player.bracing) 0.10f else 0f)),
-            0.76f + (if (player.jumping) 0.36f else max(0f, armSwing) * 0.24f),
+            side * (0.40f + (if (bracing) 0.10f else 0f)),
+            0.76f + (if (jumping) 0.36f else max(0f, armSwing) * 0.24f),
             armSwing * 0.82f + 0.12f,
         )
         mesh.sphere(shoulder, 0.105f, suit.shade(1.06f), 7, 5)
@@ -278,12 +287,12 @@ internal fun drawRunner(
     mesh.rod(neckBase, pose.p(0f, 1.42f, 0.01f), 0.105f, skin, 7, 0.095f)
     mesh.orientedEllipsoid(pose, 0f, 1.60f, 0.02f, 0.265f, 0.30f, 0.255f, skin, 10, 7)
 
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         mesh.sphere(pose.p(side * 0.255f, 1.58f, 0.01f), 0.068f, skin.shade(0.92f), 6, 4)
     }
 
     val irisColor = if (styleSeed % 3 == 0) Rgb(0.20f, 0.56f, 0.68f) else Rgb(0.36f, 0.22f, 0.12f)
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val ex = side * 0.098f
         mesh.sphere(pose.p(ex, 1.63f, 0.225f), 0.052f, Rgb(0.99f, 0.98f, 0.95f), 7, 5)
         mesh.sphere(pose.p(ex, 1.63f, 0.252f), 0.030f, irisColor, 6, 4)
@@ -315,7 +324,7 @@ internal fun drawRunner(
 
     mesh.orientedEllipsoid(pose, 0f, 1.76f, -0.01f, 0.28f, 0.16f, 0.275f, hair, 9, 6)
     mesh.orientedEllipsoid(pose, 0f, 1.60f, -0.09f, 0.265f, 0.26f, 0.20f, hair.shade(0.92f), 9, 6)
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         mesh.orientedEllipsoid(pose, side * 0.205f, 1.64f, -0.04f, 0.095f, 0.21f, 0.16f, hair.shade(0.94f), 7, 5)
     }
 
@@ -343,7 +352,7 @@ internal fun drawRunner(
         }
         2 -> {
             mesh.rod(pose.p(-0.27f, 1.60f, 0.01f), pose.p(0.27f, 1.60f, 0.01f), 0.025f, Rgb(0.20f, 0.86f, 0.78f), 5)
-            for (side in listOf(-1f, 1f)) {
+            for (side in SIDES) {
                 mesh.sphere(pose.p(side * 0.275f, 1.58f, 0.01f), 0.078f, Rgb(0.18f, 0.24f, 0.30f), 7, 5)
                 mesh.rod(
                     pose.p(side * 0.21f, 1.56f, -0.12f),
@@ -372,14 +381,15 @@ internal fun drawRunner(
 
 internal fun drawSquadTensionRope(
     mesh: TriangleMesh,
-    anchorPoints: List<Point3>,
+    anchorPoints: Array<Point3?>,
+    anchorCount: Int,
     ropeTension: Float,
     surgeActive: Boolean,
     time: Float,
 ) {
-    for (index in 0 until anchorPoints.size - 1) {
-        val anchor0 = anchorPoints[index]
-        val anchor1 = anchorPoints[index + 1]
+    for (index in 0 until anchorCount - 1) {
+        val anchor0 = anchorPoints[index] ?: continue
+        val anchor1 = anchorPoints[index + 1] ?: continue
         val distanceMeters = abs(anchor0.z - anchor1.z) / COURSE_SCALE
         val sag = 0.06f + (1f - ropeTension.coerceIn(0f, 1f)) * 0.24f + (distanceMeters / 18f).coerceIn(0f, 0.16f)
         val ropeColor = when {

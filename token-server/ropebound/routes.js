@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 /** Mount the Ropebound API independently from the voice-room token API. */
 export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, server) {
   attachRealtimeGameSocket(server, ropebound, requireRoomParticipant);
+
   app.post('/games/join', (request, response) => {
     const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
     const participant = requireRoomParticipant(request, roomCode);
@@ -66,42 +67,6 @@ export function mountRopeboundRoutes(app, ropebound, requireRoomParticipant, ser
     return response.json(ropebound.rematch(roomCode, participant.identity));
   });
 
-  app.post('/games/input', (request, response) => {
-    const roomCode = readText(request.body?.roomCode, 32).toUpperCase();
-    const participant = requireRoomParticipant(request, roomCode);
-    ropebound.input(roomCode, participant.identity, request.body);
-    return response.json({ ok: true });
-  });
-
-  // SSE carries filtered snapshots to each player; controls use POST /games/input.
-  app.get('/games/events', (request, response) => {
-    const roomCode = readText(request.query?.roomCode, 32).toUpperCase();
-    const participant = requireRoomParticipant(request, roomCode);
-    ropebound.snapshot(roomCode, participant.identity);
-    response.status(200).set({
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    response.flushHeaders();
-    response.write('retry: 1500\n\n');
-    const sendState = () => {
-      if (response.destroyed || response.writableEnded) return;
-      try {
-        response.write(`data: ${JSON.stringify(ropebound.snapshot(roomCode, participant.identity))}\n\n`);
-      } catch {
-        response.end();
-      }
-    };
-    sendState();
-    const interval = setInterval(sendState, 100);
-    // A GET request body completes immediately; the response stream is what
-    // remains open for SSE. Listen to its close event so snapshots continue
-    // until the client actually disconnects.
-    response.on('close', () => clearInterval(interval));
-  });
-
   // Advance physics at 50Hz (20ms) for crisp server responsiveness.
   const gameTick = setInterval(() => {
     for (const roomCode of ropebound.roomCodes()) ropebound.tick(roomCode, 0.020);
@@ -137,8 +102,6 @@ function attachRealtimeGameSocket(server, ropebound, requireRoomParticipant) {
       return;
     }
 
-    // Disable Nagle's algorithm (TCP_NODELAY) so small real-time WebSocket frames
-    // (inputs, pings, and 40Hz snapshots) are sent immediately without 20-40ms TCP buffering.
     socket.setNoDelay?.(true);
 
     webSockets.handleUpgrade(request, socket, head, (client) => {

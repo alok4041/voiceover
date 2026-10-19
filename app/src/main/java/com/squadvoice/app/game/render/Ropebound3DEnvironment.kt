@@ -5,16 +5,19 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.sin
 
+internal val CHECKPOINT_METERS = floatArrayOf(8f, 19f, 30f, 40f, 50f, 64f, 80f)
+
+private val SKY_BANDS = arrayOf(
+    Rgb(0.58f, 0.84f, 0.96f),
+    Rgb(0.46f, 0.76f, 0.93f),
+    Rgb(0.34f, 0.67f, 0.89f),
+    Rgb(0.25f, 0.57f, 0.84f),
+    Rgb(0.18f, 0.47f, 0.78f),
+    Rgb(0.12f, 0.38f, 0.70f),
+)
+
 internal fun drawMountainVista(mesh: TriangleMesh, time: Float) {
-    val skyBands = listOf(
-        Rgb(0.58f, 0.84f, 0.96f),
-        Rgb(0.46f, 0.76f, 0.93f),
-        Rgb(0.34f, 0.67f, 0.89f),
-        Rgb(0.25f, 0.57f, 0.84f),
-        Rgb(0.18f, 0.47f, 0.78f),
-        Rgb(0.12f, 0.38f, 0.70f),
-    )
-    for (band in skyBands.indices) {
+    for (band in SKY_BANDS.indices) {
         val y0 = -36f + band * 24f
         val y1 = y0 + 24f
         val skyZ = 152f
@@ -23,7 +26,7 @@ internal fun drawMountainVista(mesh: TriangleMesh, time: Float) {
             Point3(210f, y0, skyZ),
             Point3(210f, y1, skyZ),
             Point3(-210f, y1, skyZ),
-            skyBands[band],
+            SKY_BANDS[band],
             emissive = true,
         )
     }
@@ -36,9 +39,9 @@ internal fun drawMountainVista(mesh: TriangleMesh, time: Float) {
         val z = 28f + (cloud * 13.7f + time * 0.42f) % 84f
         val y = 13.0f + (cloud % 3) * 2.6f
         val puff = Rgb(0.95f, 0.98f, 1f)
-        mesh.ellipsoid(Point3(x, y, z), 3.6f, 1.35f, 2.3f, puff, 8, 6, smoothShading = true)
-        mesh.ellipsoid(Point3(x - 2.2f, y - 0.15f, z + 0.35f), 2.4f, 1.02f, 1.7f, puff.shade(0.97f), 7, 5, smoothShading = true)
-        mesh.ellipsoid(Point3(x + 2.1f, y - 0.10f, z - 0.30f), 2.5f, 1.10f, 1.8f, puff.shade(0.95f), 7, 5, smoothShading = true)
+        mesh.ellipsoid(Point3(x, y, z), 3.6f, 1.35f, 2.3f, puff, 8, 6)
+        mesh.ellipsoid(Point3(x - 2.2f, y - 0.15f, z + 0.35f), 2.4f, 1.02f, 1.7f, puff.shade(0.97f), 7, 5)
+        mesh.ellipsoid(Point3(x + 2.1f, y - 0.10f, z - 0.30f), 2.5f, 1.10f, 1.8f, puff.shade(0.95f), 7, 5)
     }
 
     for (i in 0 until 13) {
@@ -109,19 +112,20 @@ private fun draw3DMountainPeak(
 internal fun drawValleySideHills(
     mesh: TriangleMesh,
     cameraProgress: Float,
-    time: Float,
-    riverSections: List<Pair<Float, Float>>,
+    riverCount: Int,
+    riverStarts: FloatArray,
+    riverEnds: FloatArray,
 ) {
     for (hill in 0 until 10) {
         val side = if (hill % 2 == 0) -1f else 1f
         val z = -12f + (hill * 9.5f + cameraProgress * COURSE_SCALE * 0.25f) % 92f
-        if (riverSections.any { z in (it.first - 5f)..(it.second + 5f) }) continue
+        if (overlapsRiver(z, 5f, riverCount, riverStarts, riverEnds)) continue
         val x = side * (17.5f + (hill % 3) * 4.5f)
         val rx = 6.5f + (hill % 3) * 1.8f
         val ry = 2.6f + (hill % 4) * 0.95f
         val rz = 6.2f + (hill % 2) * 1.6f
         val hillColor = if (hill % 2 == 0) Rgb(0.28f, 0.56f, 0.25f) else Rgb(0.34f, 0.60f, 0.27f)
-        mesh.ellipsoid(Point3(x, -0.35f, z), rx, ry, rz, hillColor, 8, 5, smoothShading = true)
+        mesh.ellipsoid(Point3(x, -0.35f, z), rx, ry, rz, hillColor, 8, 5)
         if (hill % 3 == 0) {
             mesh.facetedRock(
                 Point3(x - side * (rx * 0.45f), 0.35f, z + 1.2f),
@@ -133,6 +137,19 @@ internal fun drawValleySideHills(
             )
         }
     }
+}
+
+internal fun overlapsRiver(
+    z: Float,
+    margin: Float,
+    riverCount: Int,
+    riverStarts: FloatArray,
+    riverEnds: FloatArray,
+): Boolean {
+    for (i in 0 until riverCount) {
+        if (z in (riverStarts[i] - margin)..(riverEnds[i] + margin)) return true
+    }
+    return false
 }
 
 internal fun drawStylizedTree(mesh: TriangleMesh, x: Float, z: Float, species: Int, scale: Float, time: Float) {
@@ -177,13 +194,15 @@ internal fun drawMeadows(
     mesh: TriangleMesh,
     cameraProgress: Float,
     time: Float,
-    riverSections: List<Pair<Float, Float>>,
+    riverCount: Int,
+    riverStarts: FloatArray,
+    riverEnds: FloatArray,
 ) {
     for (tuft in 0 until 78) {
         val side = if (tuft % 2 == 0) -1f else 1f
         val x = side * (4.45f + (tuft % 8) * 0.55f)
         val z = -10f + (tuft * 3.4f + cameraProgress * COURSE_SCALE * 0.75f) % 64f
-        if (riverSections.any { z in (it.first - 0.8f)..(it.second + 0.8f) }) continue
+        if (overlapsRiver(z, 0.8f, riverCount, riverStarts, riverEnds)) continue
         val windWave = sin(time * 2.5f + x * 0.4f + z * 0.6f) * 0.14f
         val green = when (tuft % 4) {
             0 -> Rgb(0.58f, 0.80f, 0.26f)
@@ -214,7 +233,6 @@ internal fun drawTrail(mesh: TriangleMesh, z0: Float, z1: Float) {
     val length = (z1 - z0).coerceAtLeast(0.1f)
     val midZ = (z0 + z1) * 0.5f
 
-    // Deep stone foundation + timber roadbed so the trail never floats above riverbanks or trenches
     mesh.box(Point3(0f, -0.48f, midZ), 8.5f, 0.72f, length, Rgb(0.38f, 0.36f, 0.34f))
     mesh.box(Point3(0f, -0.15f, midZ), 8.2f, 0.26f, length, Rgb(0.46f, 0.35f, 0.22f))
     mesh.box(Point3(0f, -0.03f, midZ), 7.2f, 0.06f, length, Rgb(0.64f, 0.50f, 0.32f))
@@ -234,7 +252,7 @@ internal fun drawTrail(mesh: TriangleMesh, z0: Float, z1: Float) {
         stoneIndex++
     }
 
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val borderX = side * 3.72f
         mesh.box(Point3(borderX, 0.06f, midZ), 0.22f, 0.16f, length, Rgb(0.40f, 0.27f, 0.16f))
     }
@@ -242,7 +260,7 @@ internal fun drawTrail(mesh: TriangleMesh, z0: Float, z1: Float) {
 
 internal fun drawCheckpointGate(mesh: TriangleMesh, z: Float, checkpoint: Float, reached: Boolean, time: Float) {
     val flagColor = if (reached) Rgb(0.22f, 0.94f, 0.68f) else Rgb(1f, 0.76f, 0.24f)
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val px = side * 3.75f
         mesh.box(Point3(px, 0.18f, z), 0.38f, 0.36f, 0.38f, Rgb(0.46f, 0.48f, 0.52f))
         mesh.rod(Point3(px, 0.32f, z), Point3(px, 2.55f, z), 0.075f, Rgb(0.92f, 0.86f, 0.72f), 6, 0.055f)
@@ -261,7 +279,7 @@ internal fun drawCheckpointGate(mesh: TriangleMesh, z: Float, checkpoint: Float,
 
 internal fun drawFinishArch(mesh: TriangleMesh, finishZ: Float, time: Float) {
     val pulse = 0.5f + 0.5f * sin(time * 4f)
-    for (side in listOf(-1f, 1f)) {
+    for (side in SIDES) {
         val px = side * 3.85f
         mesh.box(Point3(px, 0.35f, finishZ), 0.62f, 0.70f, 0.62f, Rgb(0.38f, 0.42f, 0.48f))
         mesh.rod(Point3(px, 0.65f, finishZ), Point3(px, 3.65f, finishZ), 0.18f, Rgb(0.22f, 0.28f, 0.34f), 7, 0.14f)
