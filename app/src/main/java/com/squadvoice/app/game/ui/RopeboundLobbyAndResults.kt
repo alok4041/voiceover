@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,15 +66,15 @@ internal fun LoadingLobby(error: String?, onRetry: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         if (error == null) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = PlaygroundTheme.MossEmerald)
             Spacer(Modifier.height(12.dp))
-            Text("Joining the game lobby…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Joining the game lobby…", color = PlaygroundTheme.TextSecondary)
         } else {
-            Text("Couldn't open the game lobby", fontWeight = FontWeight.Bold)
+            Text("Couldn't open the game lobby", fontWeight = FontWeight.Bold, color = PlaygroundTheme.TextPrimary)
             Spacer(Modifier.height(8.dp))
             Text(
                 error,
-                color = MaterialTheme.colorScheme.error,
+                color = PlaygroundTheme.RivalCoral,
                 fontSize = 13.sp,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
@@ -95,13 +96,12 @@ internal fun LobbyHeader(
     onSetFreeTeamSwitching: (Boolean) -> Unit,
     onExit: () -> Unit,
 ) {
-    val mint = Color(0xFF59E8D0)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .background(Color(0xD91A2835), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(0x6648B9C8), RoundedCornerShape(16.dp))
+            .background(PlaygroundTheme.StoneCard, RoundedCornerShape(16.dp))
+            .border(1.2.dp, PlaygroundTheme.MossEmerald.copy(alpha = .55f), RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -109,16 +109,16 @@ internal fun LobbyHeader(
         Row(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("ROPEBOUND · 3D", color = mint, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = .5.sp)
-            Box(Modifier.width(1.dp).height(20.dp).background(Color.White.copy(alpha = .24f)))
-            Text("Game lobby", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("TEAM VS TEAM", color = PlaygroundTheme.TimberGold, fontSize = 12.sp, fontWeight = FontWeight.Black, letterSpacing = .6.sp)
+            Box(Modifier.width(1.dp).height(20.dp).background(PlaygroundTheme.StoneBorder))
+            Text("Game lobby", color = PlaygroundTheme.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
         Surface(
             shape = RoundedCornerShape(50),
-            color = Color(0xAA15232E),
-            border = BorderStroke(1.dp, Color(0x775A7180)),
+            color = PlaygroundTheme.StoneRow,
+            border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
         ) {
             Row(
                 modifier = Modifier.height(34.dp).padding(start = 9.dp, end = 4.dp),
@@ -127,7 +127,7 @@ internal fun LobbyHeader(
             ) {
                 Text(
                     "Free switch",
-                    color = if (freeTeamSwitching) mint else Color(0xFFD0DEE6),
+                    color = if (freeTeamSwitching) PlaygroundTheme.MossEmerald else PlaygroundTheme.TextSecondary,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -138,11 +138,15 @@ internal fun LobbyHeader(
                         onCheckedChange = onSetFreeTeamSwitching,
                         enabled = !busy,
                         modifier = Modifier.graphicsLayer { scaleX = .58f; scaleY = .58f },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PlaygroundTheme.StoneDark,
+                            checkedTrackColor = PlaygroundTheme.MossEmerald,
+                        ),
                     )
                 } else {
                     Text(
                         if (freeTeamSwitching) "ON" else "HOST",
-                        color = if (freeTeamSwitching) mint else Color(0xFFB9C7D0),
+                        color = if (freeTeamSwitching) PlaygroundTheme.MossEmerald else PlaygroundTheme.TextSecondary,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -153,14 +157,14 @@ internal fun LobbyHeader(
             onClick = onToggleMicrophone,
             modifier = Modifier.height(34.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 9.dp),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xAA15232E), contentColor = Color.White),
-            border = BorderStroke(1.dp, Color(0x775A7180)),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = PlaygroundTheme.StoneRow, contentColor = PlaygroundTheme.TextPrimary),
+            border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Text(if (microphoneEnabled) "Mic on" else "Mic off", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 Box(
                     Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(
-                        if (microphoneEnabled) Color(0xFF58F0A5) else Color(0xFF87939C),
+                        if (microphoneEnabled) PlaygroundTheme.MossEmerald else Color(0xFF879388),
                     ),
                 )
             }
@@ -171,8 +175,8 @@ internal fun LobbyHeader(
             enabled = !busy,
             modifier = Modifier.height(34.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xAA15232E), contentColor = Color.White),
-            border = BorderStroke(1.dp, Color(0x775A7180)),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = PlaygroundTheme.StoneRow, contentColor = PlaygroundTheme.TextPrimary),
+            border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
         ) {
             Text("Back to voice", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
@@ -206,7 +210,7 @@ internal fun LobbyContent(
         Text(
             "At least two runners on each team · Swap players to keep both teams balanced.",
             modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFD0DEE6),
+            color = PlaygroundTheme.TextSecondary,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
@@ -252,7 +256,7 @@ internal fun LobbyContent(
             Text(
                 error ?: state.notice,
                 modifier = Modifier.fillMaxWidth(),
-                color = if (error != null) Color(0xFFFFB4B4) else Color(0xFFD0DEE6),
+                color = if (error != null) PlaygroundTheme.RivalCoral else PlaygroundTheme.TextSecondary,
                 fontSize = 9.sp,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
@@ -267,11 +271,11 @@ internal fun LobbyContent(
                 enabled = !busy && state.viewerTeam != null,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color(0xC619302F),
-                    contentColor = Color(0xFF70F0B7),
-                    disabledContentColor = Color(0xFF78958B),
+                    containerColor = PlaygroundTheme.StoneCardSelected,
+                    contentColor = PlaygroundTheme.MossBright,
+                    disabledContentColor = PlaygroundTheme.TextSecondary.copy(alpha = .5f),
                 ),
-                border = BorderStroke(1.dp, Color(0xAA5ADFAE)),
+                border = BorderStroke(1.2.dp, PlaygroundTheme.MossEmerald.copy(alpha = .75f)),
             ) {
                 Text(if (ready) "✓ Ready · tap to undo" else "✓ Ready up", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
@@ -281,10 +285,10 @@ internal fun LobbyContent(
                 enabled = !busy && state.isHost && everyoneReady,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF5BEBC0),
-                    contentColor = Color(0xFF06211E),
-                    disabledContainerColor = Color(0xFF35544F),
-                    disabledContentColor = Color(0xFFA6C0BA),
+                    containerColor = PlaygroundTheme.MossEmerald,
+                    contentColor = PlaygroundTheme.StoneDark,
+                    disabledContainerColor = PlaygroundTheme.TrackInactive,
+                    disabledContentColor = PlaygroundTheme.TextSecondary,
                 ),
             ) {
                 Text(
@@ -306,6 +310,9 @@ internal fun LobbyContent(
         val targetTeam = if (targetTeamId == "A") state.teamA else state.teamB
         AlertDialog(
             onDismissRequest = { swapSelection = null },
+            containerColor = PlaygroundTheme.StoneCard,
+            titleContentColor = PlaygroundTheme.TextPrimary,
+            textContentColor = PlaygroundTheme.TextSecondary,
             title = { Text("Swap teams") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -318,7 +325,7 @@ internal fun LobbyContent(
                             },
                             enabled = !busy,
                         ) {
-                            Text("${sourcePlayer.name}  ↔  ${player.name}")
+                            Text("${sourcePlayer.name}  ↔  ${player.name}", color = PlaygroundTheme.TimberGold)
                         }
                     }
                     if (targetTeam.players.none { it.id != sourcePlayer.id }) {
@@ -327,7 +334,7 @@ internal fun LobbyContent(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { swapSelection = null }) { Text("Close") }
+                TextButton(onClick = { swapSelection = null }) { Text("Close", color = PlaygroundTheme.MossEmerald) }
             },
         )
     }
@@ -349,14 +356,14 @@ private fun TeamCard(
     onRequestSwap: (RopeboundPlayer) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val teamAccent = if (teamId == "A") Color(0xFF59E8D0) else Color(0xFFB1C1CE)
+    val teamAccent = if (teamId == "A") PlaygroundTheme.MossEmerald else PlaygroundTheme.TimberGold
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
-        color = if (selected) Color(0xE3223A47) else Color(0xD8192934),
+        color = if (selected) PlaygroundTheme.StoneCardSelected else PlaygroundTheme.StoneCard,
         border = BorderStroke(
-            if (selected) 2.dp else 1.dp,
-            if (selected) teamAccent else Color(0x77788A98),
+            if (selected) 2.dp else 1.2.dp,
+            if (selected) teamAccent else PlaygroundTheme.StoneBorder,
         ),
         shadowElevation = if (selected) 10.dp else 4.dp,
     ) {
@@ -370,9 +377,9 @@ private fun TeamCard(
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Text(title, color = teamAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                Text(" · ${team.count}/5", color = Color(0xFFD2DEE5), fontSize = 10.sp)
+                Text(" · ${team.count}/5", color = PlaygroundTheme.TextSecondary, fontSize = 10.sp)
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(teamAccent.copy(alpha = if (selected) .52f else .22f)))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(teamAccent.copy(alpha = if (selected) .55f else .25f)))
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -381,7 +388,7 @@ private fun TeamCard(
                     Text(
                         "Waiting for runners…",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        color = Color(0xFFBCC9D1),
+                        color = PlaygroundTheme.TextSecondary,
                         fontSize = 9.sp,
                     )
                 }
@@ -390,8 +397,8 @@ private fun TeamCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(27.dp)
-                            .background(Color(0x99202C37), RoundedCornerShape(9.dp))
-                            .border(1.dp, Color(0x557A8A98), RoundedCornerShape(9.dp))
+                            .background(PlaygroundTheme.StoneRow, RoundedCornerShape(9.dp))
+                            .border(1.dp, PlaygroundTheme.StoneBorder.copy(alpha = .55f), RoundedCornerShape(9.dp))
                             .padding(horizontal = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -403,7 +410,7 @@ private fun TeamCard(
                         }
                         Text(
                             statusIcon,
-                            color = if (player.online) Color(0xFF70F0B7) else Color(0xFFFFD166),
+                            color = if (player.online) PlaygroundTheme.MossEmerald else PlaygroundTheme.TimberGold,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -415,7 +422,7 @@ private fun TeamCard(
                         Text(
                             "${player.name}$statusSuffix",
                             modifier = Modifier.weight(1f),
-                            color = if (player.online) Color.White else Color.White.copy(alpha = .58f),
+                            color = if (player.online) PlaygroundTheme.TextPrimary else PlaygroundTheme.TextSecondary,
                             fontSize = 9.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -426,12 +433,12 @@ private fun TeamCard(
                                 modifier = Modifier
                                     .height(23.dp)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Brush.linearGradient(listOf(Color(0xFF9B64E8), Color(0xFF39C8D8))))
+                                    .background(Brush.linearGradient(listOf(PlaygroundTheme.TimberWarm, PlaygroundTheme.MossEmerald)))
                                     .clickable(enabled = !busy && player.online) { onRequestSwap(player) }
                                     .padding(horizontal = 7.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("Swap", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text("Swap", color = PlaygroundTheme.StoneDark, fontSize = 8.sp, fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -441,7 +448,7 @@ private fun TeamCard(
                         "◦ $spectator · spectator",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         fontSize = 8.sp,
-                        color = Color(0xFFB9C7D0),
+                        color = PlaygroundTheme.TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -453,11 +460,11 @@ private fun TeamCard(
                 modifier = Modifier.fillMaxWidth().height(27.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color(0x55202E39),
-                    contentColor = Color.White,
-                    disabledContentColor = if (selected) teamAccent else Color(0xFFAAB9C2),
+                    containerColor = PlaygroundTheme.StoneRow,
+                    contentColor = PlaygroundTheme.TextPrimary,
+                    disabledContentColor = if (selected) teamAccent else PlaygroundTheme.TextSecondary,
                 ),
-                border = BorderStroke(1.dp, Color(0x777E929E)),
+                border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
             ) {
                 Text(
                     when {
@@ -478,12 +485,12 @@ private fun TeamCard(
 @Composable
 internal fun PingBadge(pingMs: Int?) {
     val color = when {
-        pingMs == null -> Color(0xFFB7CACE)
-        pingMs < 150 -> Color(0xFF71EBA2)
-        pingMs < 300 -> Color(0xFFFFD166)
-        else -> Color(0xFFFF8585)
+        pingMs == null -> PlaygroundTheme.TextSecondary
+        pingMs < 150 -> PlaygroundTheme.MossBright
+        pingMs < 300 -> PlaygroundTheme.TimberGold
+        else -> PlaygroundTheme.RivalCoral
     }
-    Surface(color = color.copy(alpha = .2f), shape = RoundedCornerShape(50)) {
+    Surface(color = color.copy(alpha = .22f), shape = RoundedCornerShape(50)) {
         Text(
             pingMs?.let { "$it ms" } ?: "PING —",
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
@@ -530,13 +537,13 @@ internal fun ResultContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     WinnerPartyPopper()
-                    Text(headline, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text(headline, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PlaygroundTheme.TextPrimary)
                     WinnerPartyPopper(reversed = true)
                 }
             } else {
-                Text(headline, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                Text(headline, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = PlaygroundTheme.TextPrimary)
             }
-            Text(details, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(details, color = PlaygroundTheme.TextSecondary)
             if (state.durationSeconds > 0) {
                 val ownSurges = if (state.viewerTeam == "A") state.surgesA else state.surgesB
                 val ownRescues = if (state.viewerTeam == "A") state.teamA.rescues else state.teamB.rescues
@@ -549,13 +556,25 @@ internal fun ResultContent(
                     ResultStatCard("RESCUES LEFT", ownRescues.toString(), Modifier.weight(1f))
                 }
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+            error?.let { Text(it, color = PlaygroundTheme.RivalCoral, fontSize = 12.sp) }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = onRematch, enabled = state.isHost && !busy) {
-                    Text(if (state.isHost) "Run it back" else "Waiting for host")
+                Button(
+                    onClick = onRematch,
+                    enabled = state.isHost && !busy,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PlaygroundTheme.MossEmerald,
+                        contentColor = PlaygroundTheme.StoneDark,
+                    ),
+                ) {
+                    Text(if (state.isHost) "Run it back" else "Waiting for host", fontWeight = FontWeight.Bold)
                 }
-                OutlinedButton(onClick = onExit, enabled = !busy) { Text("Back to voice room") }
+                OutlinedButton(
+                    onClick = onExit,
+                    enabled = !busy,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PlaygroundTheme.TextPrimary),
+                    border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
+                ) { Text("Back to voice room") }
             }
         }
     }
@@ -566,14 +585,15 @@ private fun ResultStatCard(label: String, value: String, modifier: Modifier = Mo
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .82f),
+        color = PlaygroundTheme.StoneCard,
+        border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(label, color = PlaygroundTheme.TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PlaygroundTheme.TimberGold)
         }
     }
 }
@@ -616,11 +636,11 @@ private fun WinnerConfetti(modifier: Modifier = Modifier) {
         label = "winner-confetti-fall",
     )
     val colors = listOf(
-        Color(0xFF62E6CE),
-        Color(0xFFFFD166),
-        Color(0xFFFF6B6B),
-        Color(0xFFB9A4FF),
-        Color(0xFF9BE564),
+        PlaygroundTheme.MossEmerald,
+        PlaygroundTheme.TimberGold,
+        PlaygroundTheme.RivalCoral,
+        PlaygroundTheme.MossBright,
+        PlaygroundTheme.TimberWarm,
     )
 
     Canvas(modifier = modifier) {

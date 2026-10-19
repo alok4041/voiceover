@@ -1,21 +1,24 @@
 # Ropebound Game Guide
 
-This is the working guide for understanding and changing Ropebound, the co-op race inside SquadVoice. It describes the **current local implementation** and separately identifies design ideas that are not implemented. The Node game core is authoritative for rules; the Android app renders and sends player controls.
+This is the working guide for understanding and changing Ropebound, the co-op race inside SquadVoice. It describes the **current working-tree implementation** and separately identifies design ideas that are not implemented. The Node game core is authoritative for gameplay rules; the Android app renders the scene, camera, and touch UI and sends player controls. Local source may be newer than the public APK or Render deployment; check Git and deployment state before assuming changes are live.
 
 ## 1. Game in one minute
 
-Two teams race along a 100-unit side-scrolling course. Each active runner has an ordered position in their team's rope chain. Players hold **Forward** or **Backward**, tap **Jump**, and hold **Brace**. The team must coordinate so the whole active chain gets to the finish. Hazard falls consume shared team rescues and return the team to its latest checkpoint. The first team with every active runner at the finish wins.
+Two teams race along a 100-unit 3D course. Each active runner has an ordered position in their team's rope chain. Players use a four-way joystick to move forward/back and steer left/right, tap **Jump**, and hold **Brace**. Dragging the playground rotates that player's camera through 360° horizontally; each player chooses their own view. The team must coordinate so the whole active chain gets to the finish. Hazard falls consume shared team rescues and return the team to its latest checkpoint. The first team with every active runner at the finish wins.
 
 Ropebound runs inside an existing SquadVoice voice room. Opening the game keeps the LiveKit voice session alive. Voice transport is separate from the game simulation: the phone sends game controls to the token server, while voice audio goes directly between the phone and LiveKit.
 
 ```mermaid
 flowchart LR
-    VoiceRoom[Active SquadVoice room] --> Lobby[Game lobby]
-    Lobby -->|host starts after teams ready| Race[Server-authoritative race]
+    VoiceRoom[Active SquadVoice room + LiveKit voice] --> Lobby[Landscape game lobby]
+    Lobby -->|host starts after 2v2 ready| Race[3D landscape race]
     Race -->|finish, rescues exhausted, or team leaves| Results[Results]
     Results -->|host rematch| Lobby
     Lobby -->|back / exit| VoiceRoom
-    Phone[Android controls] <-->|WebSocket snapshots, input, ping + room JWT| Server[Render game API + simulation]
+    UI[Compose HUD + four-way joystick + Jump/Brace] -->|move, steer, jump, brace| WS
+    Camera[Local 360° orbit / tilt] --> Renderer
+    WS[Authenticated WebSocket] <-->|inputs + authoritative snapshots| Server[Node game API + simulation]
+    Server -->|filtered snapshots| Renderer[OpenGL ES 2.0 scene]
 ```
 
 ## 2. Source of truth and implementation boundary
@@ -28,7 +31,10 @@ The client must send **inputs only**. It must not send or be trusted for positio
 
 ### Android renders and controls
 
-- `app/src/main/java/com/squadvoice/app/game/RopeboundGameScreen.kt` — lobby/race/results UI, landscape game view, canvas, controls, snapshot handling.
+- `app/src/main/java/com/squadvoice/app/game/RopeboundGameScreen.kt` — lobby/race/results UI, landscape game view, input state, camera modes, touch controls, snapshot handling.
+- `app/src/main/java/com/squadvoice/app/game/Ropebound3DScene.kt` — OpenGL ES 2.0 scene host, camera gestures and local camera transforms.
+- `app/src/main/java/com/squadvoice/app/game/render/` — procedural 3D environment, mesh helpers, and runner rendering.
+- `app/src/main/java/com/squadvoice/app/game/ui/RopeboundHudControls.kt` — four-way virtual joystick, Jump/Brace controls, camera buttons, settings dialog.
 - `app/src/main/java/com/squadvoice/app/game/RopeboundApi.kt` — HTTP lobby actions, authenticated game WebSocket, and JSON-to-model parsing.
 - `app/src/main/java/com/squadvoice/app/game/RopeboundGameAudio.kt` — local game sounds and ambience.
 - `app/src/main/java/com/squadvoice/app/MainActivity.kt` — enters/exits Ropebound from the voice room, preserves the session, and requests landscape orientation while the game is open.
@@ -50,22 +56,30 @@ These values and behaviors are read from the current working-tree implementation
 - Team changes are lobby-only. The host can arrange swaps. A non-host can switch themselves after the host enables free switching. Team changes/swaps clear readiness. Team capacity and a two-player minimum on the departing team are enforced.
 - The server starts a randomly arranged course at match start and resets each team's checkpoint and three-rescue allowance.
 
-**Rule mismatch to resolve deliberately:** `docs/ropebound-design.md` says a 1-v-1 can start and suggests teams may have 1–5 runners. Current server constants, start validation, and lobby UI require at least 2 on each team. Treat the code/UI behavior above as current. Decide and change server validation, UI copy, tests/playtest expectations, and this guide together if adopting 1-v-1.
-
 ### Movement and controls
 
-World coordinates are course units (the UI often labels distances as metres); the full course is 100 units.
+The server course is 100 units long. `player.x` is longitudinal course progress; `lateralOffset` is cross-lane steering; `player.y` is jump height. The renderer maps those axes to world Z, X, and Y respectively. The UI may label course distance in metres.
 
 | Rule | Current server behavior |
 | --- | --- |
 | Move | Input is `-1`, `0`, or `1` (backward, neutral, forward). Forward acceleration is 30 units/s²; top forward speed is 12 units/s. Reverse is capped at 45% of top speed. |
-| Neutral | Horizontal velocity is damped each simulation step. |
+| Steer | Input is `-1` to `1` (left/right). Lateral acceleration is 20 units/s²; lateral speed is capped at 2.6 units/s; the player's lateral lane offset is clamped to ±1.25 units. |
+| Diagonal input | The server normalizes the combined `move`/`steer` magnitude when it exceeds 1, so diagonal movement cannot exceed the input cap. |
+| Neutral | Forward and lateral velocities are damped when their joystick axes return to neutral. |
 | Jump | A rising-edge jump input while grounded sets vertical velocity to 16. Gravity is 25 units/s². Holding jump does not increase jump height. |
 | Brace | Held input reduces acceleration to 55% of normal. In the wind hazard, not bracing subtracts 7 units/s² of horizontal velocity. |
-| Input validity | Sequence numbers must strictly increase; movement must be -1/0/1; requests arrive no faster than one per 30ms. Inputs expire after 700ms without a refresh. |
+| Input validity | Sequence numbers must strictly increase; `move` and `steer` must each be within -1..1; requests arrive no faster than one per 30ms. Inputs expire after 700ms without a refresh. |
 | Server step | The Express server advances the simulation on a 50ms interval (20Hz); `tick` clamps each step to 50ms. |
 
-Android sends active held controls about every 100ms and sends state transitions/jump pulses as needed. Jump is a tap/pulse and is accepted only while grounded. A jump request while airborne does nothing.
+Android sends active held controls about every 100ms and sends state transitions/jump pulses as needed. The joystick's up/down axis controls course progress; left/right shifts the runner across its lane. Jump is a tap/pulse and is accepted only while grounded. A jump request while airborne does nothing.
+
+### Camera and local rendering
+
+- The OpenGL ES scene is rendered by `Ropebound3DScene.kt`; procedural geometry, terrain, obstacles, runners, and effects live under `game/render/` and `game/obstacles/`.
+- Drag anywhere on the exposed playfield to orbit the local camera. Horizontal yaw wraps around the full 360°; vertical pitch is intentionally clamped to keep the view usable and avoid camera flips. Presets include Follow, 3D orbit, and Top.
+- Camera state is local to each device and never enters game input, snapshots, collision calculations, or opponent state. Teammates may look from different angles while seeing the same authoritative race.
+- Compose overlays the HUD and controls over the GL view. The four-way joystick controls movement; Jump and Brace are separate. Avoid placing a camera drag target over touch controls, Android system bars, or the active voice/mute controls.
+- The renderer interpolates snapshots and may predict the local runner for responsiveness. Any local prediction must reconcile to the next authoritative server snapshot.
 
 ### Rope and team movement
 
@@ -136,11 +150,11 @@ The current Compose lobby shows Team A/B roster, host, ready state, ping, team s
 
 ### Race
 
-The landscape Compose screen keeps the HUD, voice/settings actions, errors, and touch controls in Compose. The playfield is rendered as a perspective 3D scene by `Ropebound3DScene.kt` using Android OpenGL ES 2.0. A compact FOLLOW/TOP toggle smoothly transitions between a trailing third-person camera and an overhead view. The scene builds low-poly 3D terrain, a layered sky and mountain backdrop, volumetric clouds, grass, trees, characters, obstacles, flowing water with moving wave highlights and riverbank details, fire, and a single gently sagging rope bridge. Bridge planks and rails flex in response to nearby player movement and jumping. Runner models have shaped clothing, facial features, shoes, packs, and harnesses; a flexible-looking rope is drawn from each harness along the team's rope chain, while server rope constraints remain authoritative for gameplay. Player progress is normalized to 0–1 in snapshots, while obstacle and checkpoint positions use course meters; convert between those units when positioning scene elements. Name and ping badges are projected above visible teammates and move with the camera. The scene does not show opponent runner positions. Movement, jump, and brace controls use compact 56dp touch targets. Race errors use a dismissible bottom banner; the old central next-hazard panel is removed.
+The landscape Compose screen keeps the HUD, voice/settings actions, errors, and touch controls in Compose. The playfield is rendered as a perspective 3D scene by `Ropebound3DScene.kt` using Android OpenGL ES 2.0. The local camera has Follow, 3D Orbit, and Top presets; dragging across the playfield rotates the camera through a full 360° horizontal orbit with bounded vertical tilt. Each phone has its own camera state. The scene builds low-poly terrain, layered sky and mountains, clouds, grass, trees, characters, obstacles, flowing water, fire, and a sagging rope bridge. Bridge planks and rails flex in response to nearby player movement and jumping. Runner models have clothing, facial features, shoes, packs, and harnesses; the renderer draws the rope chain while server constraints remain authoritative. Server longitudinal progress is normalized to 0–1 in snapshots, while obstacle/checkpoint positions use course units; convert between these units when positioning scene elements. Name and ping badges are projected above visible teammates and move with the camera. The scene does not show opponent runner positions. Race errors use a dismissible bottom banner.
 
 Water ripples, grass sway, bridge flex, fire flicker, embers, and runner motion are client-side render effects. The geometry is procedural and follows the server-provided obstacle spans, so randomized course placement remains aligned. Collision, course positions, progress, and recovery remain server-authoritative. Canva output is only a visual reference and is not placed in the game as a flat background or sprite.
 
-Controls: hold backward, hold forward, tap jump, hold brace. Audio cues and ambience are local assets under `app/src/main/res/raw/` and managed by `RopeboundGameAudio.kt`; game audio uses Android's game/media route so it does not replace the LiveKit voice call route.
+Controls: the four-way joystick moves forward/backward and steers left/right; combined axes allow diagonals and the server normalizes their magnitude. Tap Jump while grounded and hold Brace for the wind hazard. Drag the exposed playfield to rotate the local camera; camera movement is not sent to the game server. Audio cues and ambience are local assets under `app/src/main/res/raw/` and managed by `RopeboundGameAudio.kt`; game audio uses Android's game/media route so it does not replace the LiveKit voice call route.
 
 ### Results
 
@@ -161,7 +175,7 @@ Every game request authenticates with the existing LiveKit participant JWT in `A
 | `/games/swap-team` | POST | Swap two players from opposite teams in lobby. |
 | `/games/ready` | POST | Set current player's ready state. |
 | `/games/start` | POST | Host starts a valid, ready lobby. |
-| `/games/input` | POST | Legacy HTTP input retained for compatibility; current Android game sends `seq`, `move`, `jump`, `brace` over the WebSocket. |
+| `/games/input` | POST | Legacy HTTP input retained for compatibility; current Android game sends `seq`, `move`, `steer`, `jump`, and `brace` over the WebSocket. |
 | `/games/rematch` | POST | Host resets the results match to lobby. |
 | `/games/leave` | POST | Leave/remove the player. |
 
@@ -171,9 +185,9 @@ Snapshots include phase, both teams' counts and aggregate progress, viewer team/
 
 ## 6. Current code vs design ideas
 
-`docs/ropebound-design.md` is the broader product design and contains future ideas. It is not proof that those mechanics exist. Current code does **not** implement all-player push-to-talk, team-only voice modes, reconnect pause windows, AFK warnings/kicks, user-selectable levels, alternate route choices, collectibles, 3D, persisted matches, or Redis-backed state. The current game uses one drawn Training Yard scene with server-randomized placements of the six existing hazards.
+`docs/ropebound-design.md` is the broader product design and contains future ideas. It is not proof that those mechanics exist. The current code includes the 3D renderer, local orbit/follow/top camera modes, four-way joystick steering, Jump, Brace, WebSocket gameplay, and server-randomized placements for six hazard types. It does **not** implement all-player push-to-talk, team-only voice modes, reconnect pause windows, AFK warnings/kicks, selectable named levels, alternate route choices, collectibles, or Redis-backed state.
 
-The game core is held in memory by the token-server process. Restarting Render clears active game simulations. Game events use Server-Sent Events rather than WebSockets. Check hosting/deploy state and multi-phone behavior before assuming production-scale real-time reliability.
+The game core is held in memory by the token-server process. Restarting Render clears active game simulations. Game traffic uses the authenticated WebSocket described above, not server-sent events. Check the deployed commit and test multiplayer behavior before assuming a local implementation is live or production-scale.
 
 ## 7. How to make independent gameplay changes
 
@@ -186,13 +200,14 @@ Use the player goal and constraints to make ordinary design choices without aski
 5. Update this guide and `docs/ropebound-design.md` when decisions change. Label proposals as future ideas, not current behavior.
 6. Validate the game with at least 2 active runners per team for the current implementation, and verify voice stays connected. Physical-device multiplayer is needed to judge touch feel and network behavior.
 
-The room-code body fix, dismissible error, runner ground anchor/rope adjustment, and shortened server hazard spans are committed in `aff5302` on `main`. The current worktree has an additional uncommitted `RopeboundGameScreen.kt` adjustment that rearranges landscape touch controls and changes spike appearance (orange, taller teeth with gaps). Inspect its diff before editing. Rebuild before sharing an APK, and verify whether the server commit is live on Render before expecting the shortened hazard spans in a live match.
+Some current game behavior may exist only in local source and not in the APK or Render deployment. Before editing, inspect `git status --short` and the diffs; before asking another player to test it, confirm the change has been built and deployed to the correct target. Do not treat this guide as proof that a specific build is public.
 
 ## 8. Suggested playtest checklist
 
 - Join Ropebound from an active voice room and confirm voice stays connected.
 - Confirm a lobby with fewer than two players on either team cannot start; ready every player and confirm only the host can start.
-- Try forward/backward, jump, and brace on more than one Android phone; verify jump only fires from ground and releasing controls stops them.
+- Try all joystick directions, diagonals, Jump, and Brace on more than one Android phone; verify releasing controls stops both axes and Jump only fires from ground.
+- Rotate the camera all the way around, tilt up/down, and restore Follow/Orbit/Top. Confirm camera movement does not move the runner or interfere with touch controls.
 - Observe the rope near maximum stretch and verify it constrains runners without breaking or launching them.
 - Try each hazard action and recovery. Check checkpoint formation does not spawn inside a hazard.
 - Coordinate forward running as a team to charge/activate Squad Surge.

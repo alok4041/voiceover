@@ -18,90 +18,100 @@ internal fun buildRiver(
     val near = min(z1, z2)
     val far = max(z1, z2)
     val riverLength = (far - near).coerceAtLeast(0.5f)
-    val nx = 28
-    val nz = 8
+    val midZ = (near + far) * 0.5f
 
-    fun waterLevel(x: Float, z: Float): Float {
-        val wave1 = sin(time * 2.4f + x * 0.36f + z * 1.2f) * 0.055f
-        val wave2 = sin(time * 3.2f - x * 0.46f + z * 0.82f) * 0.032f
-        return (-0.64f + wave1 + wave2).coerceIn(-0.75f, -0.52f)
+    // 1. Rushing White-Water Rapids & Partially Submerged River Boulders in the Crossing Gorge
+    for (foam in 0..14) {
+        val fx = -14f + (foam % 7) * 4.6f + sin(time * 1.4f + foam * 1.7f) * 0.65f
+        val travel = (time * 0.38f + foam * 0.13f) % 1f
+        val fz = near + (riverLength - 0.3f).coerceAtLeast(0.1f) * travel
+        mesh.rod(
+            Point3(fx - 0.95f, -0.71f, fz),
+            Point3(fx + 0.95f, -0.71f, fz + 0.22f),
+            0.055f,
+            Rgb(0.94f, 0.99f, 1.0f),
+            5,
+            emissive = true,
+        )
+    }
+    for (rb in -2..2) {
+        val rbx = rb * 3.2f + 0.6f
+        val rbz = midZ + (rb % 2) * 0.85f
+        mesh.ellipsoid(Point3(rbx, -0.72f, rbz), 0.92f, 0.04f, 0.85f, Rgb(0.94f, 0.99f, 1.0f), 6, 3, emissive = true)
+        mesh.facetedRock(Point3(rbx, -0.58f, rbz), 0.68f, 0.42f, 0.62f, Rgb(0.44f, 0.46f, 0.48f), rb * 19 + 31)
     }
 
-    mesh.plane(-23f, 23f, near, far, -0.98f, Rgb(0.08f, 0.20f, 0.26f))
-
-    for (ix in 0 until nx) {
-        for (iz in 0 until nz) {
-            val x0 = -23f + 46f * ix / nx
-            val x1 = -23f + 46f * (ix + 1) / nx
-            val a = near + riverLength * iz / nz
-            val b = near + riverLength * (iz + 1) / nz
-
-            val y00 = waterLevel(x0, a); val y01 = waterLevel(x0, b)
-            val y11 = waterLevel(x1, b); val y10 = waterLevel(x1, a)
-
-            val waveHeight = (y00 + y01 + y11 + y10) * 0.25f
-            val crest = ((waveHeight + 0.64f) / 0.09f).coerceIn(-1f, 1f)
-            val caustic = 0.5f + 0.5f * sin(ix * 0.42f - iz * 0.28f + time * 1.9f)
-            val shimmer = 0.82f + (crest + 1f) * 0.07f + caustic * 0.09f
-            val waterColor = Rgb(0.06f * shimmer, 0.44f * shimmer, 0.68f * shimmer)
-            mesh.quad(
-                Point3(x0, y00, a),
-                Point3(x0, y01, b),
-                Point3(x1, y11, b),
-                Point3(x1, y10, a),
-                waterColor,
-            )
-        }
-    }
-
-    for (foam in 0..10) {
-        val laneX = -19f + (foam % 5) * 9.5f + sin(time * 1.3f + foam * 1.7f) * 0.65f
-        val travel = (time * 0.30f + foam * 0.143f) % 1f
-        val z = near + (riverLength - 0.25f).coerceAtLeast(0.1f) * travel
-        val startX = laneX - 0.82f; val endX = laneX + 0.82f
-        val startY = waterLevel(startX, z) + 0.008f
-        val endY = waterLevel(endX, z + 0.18f) + 0.008f
-        val sprayColor = if (foam % 2 == 0) Rgb(0.90f, 0.98f, 1f) else Rgb(0.72f, 0.94f, 0.98f)
-        mesh.rod(Point3(startX, startY, z), Point3(endX, endY, z + 0.18f), 0.018f, sprayColor, 5, emissive = true)
-    }
-
+    // 2. Stepped Mossy Ashlar Cliff Abutments on Both Riverbanks
     for (bankIndex in 0..1) {
         val bankZ = if (bankIndex == 0) near else far
         val landSign = if (bankIndex == 0) -1f else 1f
-        val shoreColor = Rgb(0.66f, 0.58f, 0.42f)
-        val shoreTopZ = bankZ + landSign * 0.85f
-        mesh.quad(
-            Point3(-23f, -0.66f, bankZ),
-            Point3(-23f, -0.28f, shoreTopZ),
-            Point3(-3.9f, -0.28f, shoreTopZ),
-            Point3(-3.9f, -0.66f, bankZ),
-            shoreColor,
-        )
-        mesh.quad(
-            Point3(3.9f, -0.66f, bankZ),
-            Point3(3.9f, -0.28f, shoreTopZ),
-            Point3(23f, -0.28f, shoreTopZ),
-            Point3(23f, -0.66f, bankZ),
-            shoreColor,
-        )
+        val stoneCol = Rgb(0.48f, 0.47f, 0.43f)
+        val mossCol = Rgb(0.42f, 0.80f, 0.18f)
 
-        mesh.box(Point3(0f, -0.48f, bankZ + landSign * 0.38f), 8.3f, 1.02f, 0.82f, Rgb(0.46f, 0.48f, 0.50f))
-        mesh.box(Point3(0f, 0.04f, bankZ + landSign * 0.42f), 6.4f, 0.09f, 0.88f, Rgb(0.58f, 0.42f, 0.26f))
-
-        for (rock in 0..14) {
-            val rawX = -21f + rock * 2.85f
-            if (abs(rawX) < 4.55f) continue
-            val rz = bankZ + landSign * (0.95f + sin(rock * 1.8f + bankIndex) * 0.22f)
-            val scale = 0.58f + (rock % 4) * 0.14f
-            val rockColor = if (rock % 2 == 0) Rgb(0.52f, 0.55f, 0.53f) else Rgb(0.60f, 0.58f, 0.52f)
-            mesh.facetedRock(Point3(rawX, -0.32f, rz), scale, 0.38f + (rock % 3) * 0.08f, 0.48f + scale * 0.15f, rockColor, rock + bankIndex * 37)
-        }
+        mesh.box(Point3(0f, -0.46f, bankZ + landSign * 0.42f), 9.6f, 0.98f, 0.88f, stoneCol)
+        mesh.box(Point3(0f, 0.04f, bankZ + landSign * 0.44f), 9.8f, 0.12f, 0.94f, mossCol)
+        mesh.box(Point3(0f, 0.06f, bankZ + landSign * 0.42f), 6.8f, 0.08f, 0.88f, Rgb(0.62f, 0.42f, 0.24f))
     }
 
     if (bridge) {
-        val bridgeWidth = 5.8f
-        val planks = 12
+        val bridgeWidth = 6.2f
+        val planks = 13
+        val logDark = Rgb(0.38f, 0.22f, 0.11f)
+        val logWarm = Rgb(0.54f, 0.32f, 0.16f)
+        val ropeGold = Rgb(0.84f, 0.66f, 0.38f)
 
+        // 3. Weathered Timber Log A-Frame Trestle Piers, Diagonal Knee Braces & Coiled Hemp Rope Lashings
+        for (endIdx in 0..1) {
+            val endZ = if (endIdx == 0) near + 0.18f else far - 0.18f
+            val bankSign = if (endIdx == 0) -1f else 1f
+            for (side in SIDES) {
+                val postX = side * 2.95f
+                // Main round timber pier from river floor to short handrail stub
+                mesh.rod(Point3(postX, -0.82f, endZ), Point3(postX, 0.82f, endZ), 0.22f, logDark, 7, 0.19f)
+                // Diagonal timber knee-brace strut into the cliff bank
+                mesh.rod(
+                    Point3(postX, -0.58f, endZ),
+                    Point3(postX, 0.02f, endZ - bankSign * 0.95f),
+                    0.14f,
+                    logWarm,
+                    6,
+                )
+                // Diagonal cross-brace under the bridge deck
+                mesh.rod(
+                    Point3(postX, -0.52f, endZ),
+                    Point3(side * 1.35f, 0.04f, endZ),
+                    0.12f,
+                    logWarm,
+                    6,
+                )
+                // 3D Coiled Hemp Rope Lashing Rings around the timber post
+                for (wrap in 0..2) {
+                    val wy = -0.18f + wrap * 0.36f
+                    mesh.ellipsoid(Point3(postX, wy, endZ), 0.27f, 0.07f, 0.27f, ropeGold, 7, 4)
+                }
+            }
+        }
+
+        // 4. Sagging Hemp Handrail Ropes & Twin Underside Support Cables
+        for (side in SIDES) {
+            val railX = side * 2.95f
+            var prevHand = Point3(railX, 0.72f, near + 0.18f)
+            var prevUnder = Point3(railX * 0.82f, 0.02f, near + 0.18f)
+            val steps = 16
+            for (s in 1..steps) {
+                val t = s.toFloat() / steps
+                val z = near + 0.18f + (riverLength - 0.36f) * t
+                val sag = -sin(t * PI).toFloat() * 0.24f
+                val curHand = Point3(railX, 0.72f + sag, z)
+                val curUnder = Point3(railX * 0.82f, 0.02f + sag * 0.65f, z)
+                mesh.rod(prevHand, curHand, 0.052f, ropeGold, 6)
+                mesh.rod(prevUnder, curUnder, 0.045f, ropeGold.shade(0.82f), 5)
+                prevHand = curHand
+                prevUnder = curUnder
+            }
+        }
+
+        // 5. Rough-Hewn Weathered Timber Planks with Wood Grain, Gaps, Tilted Planks & Tumbling Splinters
         fun footstepsAt(progress: Float, radius: Float): Float {
             var flex = 0f
             for (playerIndex in players.indices) {
@@ -119,40 +129,38 @@ internal fun buildRiver(
         for (index in 0 until planks) {
             val t = (index + 0.5f) / planks
             val z = near + riverLength * t
-            val arch = sin(t * PI).toFloat() * 0.18f
+            val sag = -sin(t * PI).toFloat() * 0.14f
             val plankProgress = ((z / COURSE_SCALE) + cameraProgress * 100f) / 100f
             val stepFlex = footstepsAt(plankProgress, 2.6f)
             val wobble = sin(time * 2.2f + index * 0.68f) * 0.018f + stepFlex
-            val roll = sin(time * 2.7f + index * 0.54f) * 0.020f + stepFlex * 0.55f
-            val wood = if (index % 2 == 0) Rgb(0.66f, 0.42f, 0.23f) else Rgb(0.76f, 0.50f, 0.28f)
-            val plankY = 0.08f + arch + wobble
+            val roll = sin(time * 2.7f + index * 0.54f) * 0.028f + (if (index == 6) -0.08f else 0f) + stepFlex * 0.55f
+            val wood = when (index % 3) {
+                0 -> Rgb(0.68f, 0.40f, 0.19f)
+                1 -> Rgb(0.58f, 0.33f, 0.15f)
+                else -> Rgb(0.74f, 0.45f, 0.22f)
+            }
+            val plankY = 0.08f + sag + wobble
+            val plankDepth = (riverLength / planks) * 0.78f
 
-            mesh.bridgePlank(Point3(0f, plankY, z), bridgeWidth, 0.18f, riverLength / planks * 0.88f, roll, wood)
+            mesh.bridgePlank(Point3(0f, plankY, z), bridgeWidth, 0.16f, plankDepth, roll, wood)
 
-            for (side in SIDES) {
-                val railY = 0.92f + arch * 0.6f + wobble * 0.75f
-                mesh.rod(Point3(side * 2.76f, plankY + 0.08f, z), Point3(side * 2.76f, railY, z), 0.034f, Rgb(0.84f, 0.70f, 0.46f), 5)
+            // Rope knots & vertical rope hangers on every second plank
+            if (index % 2 == 0) {
+                for (side in SIDES) {
+                    val railY = 0.72f - sin(t * PI).toFloat() * 0.24f
+                    mesh.rod(Point3(side * 2.92f, plankY + 0.04f, z), Point3(side * 2.95f, railY, z), 0.032f, ropeGold, 5)
+                    mesh.ellipsoid(Point3(side * 2.88f, plankY + 0.05f, z), 0.12f, 0.09f, 0.12f, ropeGold.shade(0.9f), 5, 4)
+                }
             }
         }
 
-        for (endIdx in 0..1) {
-            val endZ = if (endIdx == 0) near else far
-            for (side in SIDES) {
-                val postX = side * 2.82f
-                mesh.box(Point3(postX, 0.42f, endZ), 0.36f, 2.48f, 0.36f, Rgb(0.44f, 0.25f, 0.13f))
-                mesh.box(Point3(postX, 1.70f, endZ), 0.44f, 0.16f, 0.44f, Rgb(0.62f, 0.38f, 0.20f))
-            }
-        }
-
-        for (side in SIDES) {
-            var previous = Point3(side * 2.82f, 1.52f, near)
-            for (step in 1..18) {
-                val t = step / 18f
-                val sag = -sin(t * PI).toFloat() * 0.52f
-                val current = Point3(side * 2.82f, 1.52f + sag, near + riverLength * t)
-                mesh.rod(previous, current, 0.055f, Rgb(0.56f, 0.36f, 0.20f), 6)
-                previous = current
-            }
+        // Tumbling wooden splinter fragments mid-air around the middle of the bridge
+        for (splinter in 0..1) {
+            val fallCycle = (time * 0.75f + splinter * 0.5f) % 1f
+            val sx = if (splinter == 0) 1.4f else -1.1f
+            val sy = (0.35f - fallCycle * 0.95f).coerceAtLeast(-0.68f)
+            val sz = midZ + (splinter - 0.5f) * 0.65f
+            mesh.bridgePlank(Point3(sx, sy, sz), 0.72f, 0.10f, 0.24f, time * 3.5f + splinter, logWarm)
         }
     }
 }

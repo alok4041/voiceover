@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
@@ -115,7 +116,7 @@ internal class Pose3D(
  * Stride = 9 floats (36 bytes): [x, y, z, nx, ny, nz, r, g, b].
  */
 internal class TriangleMesh {
-    private var data = FloatArray(320_000)
+    private var data = FloatArray(480_000)
     private var size = 0
     private val rockRingX = FloatArray(35)
     private val rockRingY = FloatArray(35)
@@ -179,7 +180,7 @@ internal class TriangleMesh {
     fun fillBuffer(existing: FloatBuffer?): FloatBuffer {
         val neededFloats = size
         val buffer = if (existing == null || existing.capacity() < neededFloats) {
-            ByteBuffer.allocateDirect(max(neededFloats * 4, 320_000 * 4))
+            ByteBuffer.allocateDirect(max(neededFloats * 4, 480_000 * 4))
                 .order(ByteOrder.nativeOrder())
                 .asFloatBuffer()
         } else {
@@ -191,16 +192,16 @@ internal class TriangleMesh {
         return buffer
     }
 
-    fun box(center: Point3, width: Float, height: Float, depth: Float, color: Rgb) {
+    fun box(center: Point3, width: Float, height: Float, depth: Float, color: Rgb, emissive: Boolean = false) {
         val x0 = center.x - width * 0.5f; val x1 = center.x + width * 0.5f
         val y0 = center.y - height * 0.5f; val y1 = center.y + height * 0.5f
         val z0 = center.z - depth * 0.5f; val z1 = center.z + depth * 0.5f
-        quad(Point3(x0, y1, z0), Point3(x0, y1, z1), Point3(x1, y1, z1), Point3(x1, y1, z0), color.shade(1.08f))
-        quad(Point3(x0, y0, z1), Point3(x0, y0, z0), Point3(x1, y0, z0), Point3(x1, y0, z1), color.shade(0.68f))
-        quad(Point3(x0, y0, z1), Point3(x1, y0, z1), Point3(x1, y1, z1), Point3(x0, y1, z1), color)
-        quad(Point3(x1, y0, z0), Point3(x0, y0, z0), Point3(x0, y1, z0), Point3(x1, y1, z0), color.shade(0.88f))
-        quad(Point3(x0, y0, z0), Point3(x0, y0, z1), Point3(x0, y1, z1), Point3(x0, y1, z0), color.shade(0.92f))
-        quad(Point3(x1, y0, z1), Point3(x1, y0, z0), Point3(x1, y1, z0), Point3(x1, y1, z1), color.shade(0.84f))
+        quad(Point3(x0, y1, z0), Point3(x0, y1, z1), Point3(x1, y1, z1), Point3(x1, y1, z0), color.shade(1.08f), emissive)
+        quad(Point3(x0, y0, z1), Point3(x0, y0, z0), Point3(x1, y0, z0), Point3(x1, y0, z1), color.shade(0.68f), emissive)
+        quad(Point3(x0, y0, z1), Point3(x1, y0, z1), Point3(x1, y1, z1), Point3(x0, y1, z1), color, emissive)
+        quad(Point3(x1, y0, z0), Point3(x0, y0, z0), Point3(x0, y1, z0), Point3(x1, y1, z0), color.shade(0.88f), emissive)
+        quad(Point3(x0, y0, z0), Point3(x0, y0, z1), Point3(x0, y1, z1), Point3(x0, y1, z0), color.shade(0.92f), emissive)
+        quad(Point3(x1, y0, z1), Point3(x1, y0, z0), Point3(x1, y1, z0), Point3(x1, y1, z1), color.shade(0.84f), emissive)
     }
 
     fun orientedBox(
@@ -453,6 +454,62 @@ internal class TriangleMesh {
                 putVertex(p3x, p3y, p3z, n0x, n0y, n0z, color.r, color.g, color.b)
                 putVertex(p2x, p2y, p2z, n1x, n1y, n1z, color.r, color.g, color.b)
             }
+        }
+    }
+
+    /**
+     * Builds a 3D ancient ivy-covered stone archway ruin with true voussoir arch blocks,
+     * stepped masonry columns, and lush overhanging green moss/ivy clusters.
+     */
+    fun stoneArchRuin(cx: Float, baseY: Float, cz: Float, spanZ: Float, height: Float) {
+        val stoneBase = Rgb(0.49f, 0.48f, 0.45f)
+        val stoneWarm = Rgb(0.55f, 0.53f, 0.49f)
+        val mossBright = Rgb(0.42f, 0.80f, 0.18f)
+        val mossDeep = Rgb(0.22f, 0.56f, 0.14f)
+
+        val colOffset = spanZ * 0.38f
+        // Stacked ashlar masonry blocks for the two arch pillars
+        val rows = 6
+        val rowH = (height * 0.68f) / rows
+        for (end in -1..1 step 2) {
+            val pz = cz + end * colOffset
+            for (r in 0 until rows) {
+                val by = baseY + (r + 0.5f) * rowH
+                val jitter = ((r + end) % 2) * 0.06f
+                val shade = if ((r + end) % 2 == 0) stoneBase else stoneWarm
+                box(Point3(cx + jitter, by, pz), 1.12f, rowH * 0.92f, 1.18f, shade)
+            }
+        }
+
+        // True curved voussoir stone arch linking the two pillars
+        val archCenterY = baseY + height * 0.65f
+        val archRadius = colOffset
+        val segments = 8
+        for (s in 0 until segments) {
+            val a0 = PI.toFloat() * s / segments
+            val a1 = PI.toFloat() * (s + 1) / segments
+            val am = (a0 + a1) * 0.5f
+            val az = cz + cos(am) * archRadius
+            val ay = archCenterY + sin(am) * (height * 0.32f)
+            val stone = if (s % 2 == 0) stoneWarm else stoneBase.shade(0.92f)
+            box(Point3(cx, ay, az), 1.08f, 0.52f, (spanZ / segments) * 0.95f, stone)
+        }
+
+        // Upper parapet wall above the arch & lush cascading ivy vines
+        val topY = archCenterY + height * 0.36f
+        box(Point3(cx, topY, cz), 1.15f, 0.62f, spanZ * 0.96f, stoneBase)
+        ellipsoid(Point3(cx, topY + 0.36f, cz), 0.72f, 0.28f, spanZ * 0.50f, mossBright, 7, 5)
+        for (v in -2..2) {
+            val vz = cz + v * (spanZ * 0.18f)
+            val vineLen = 0.75f + abs(v) * 0.35f
+            rod(
+                Point3(cx - 0.52f, topY + 0.28f, vz),
+                Point3(cx - 0.56f, topY + 0.28f - vineLen, vz),
+                0.14f,
+                if (v % 2 == 0) mossBright else mossDeep,
+                5,
+                0.06f,
+            )
         }
     }
 }

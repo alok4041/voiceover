@@ -32,6 +32,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,16 +78,14 @@ internal fun GameSettingsButton(
         modifier = modifier
             .size(36.dp)
             .clip(RoundedCornerShape(50))
-            .background(Color(0xCC10212A))
-            .border(1.dp, Color.White.copy(alpha = .6f), RoundedCornerShape(50))
+            .background(PlaygroundTheme.StoneCard)
+            .border(1.2.dp, PlaygroundTheme.MossEmerald.copy(alpha = .68f), RoundedCornerShape(50))
             .clickable(onClick = onClick)
-            .semantics {
-                contentDescription = "Game audio settings"
-            },
+            .semantics { contentDescription = "Game audio settings" },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(18.dp)) {
-            val color = Color.White
+            val color = PlaygroundTheme.TimberGold
             val cx = size.width / 2f
             val cy = size.height / 2f
             val stroke = 1.8.dp.toPx()
@@ -185,9 +184,10 @@ internal fun VirtualJoystick(
     ) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val radius = size.minDimension * .47f
+        // Carved Mossy Stone & Timber Outer Base
         drawCircle(
             brush = Brush.radialGradient(
-                listOf(Color(0xF11B3038), Color(0xD90B171D)),
+                listOf(Color(0xF2344236), Color(0xE6182019)),
                 center = center,
                 radius = radius,
             ),
@@ -195,12 +195,12 @@ internal fun VirtualJoystick(
             center = center,
         )
         drawCircle(
-            if (editing) Color(0xFF48F0D8) else Color(0xFFE2F4F4).copy(alpha = .78f),
+            if (editing) PlaygroundTheme.TimberGold else PlaygroundTheme.MossEmerald.copy(alpha = .85f),
             radius,
             center,
-            style = Stroke(if (editing) 2.6.dp.toPx() else 2.dp.toPx()),
+            style = Stroke(if (editing) 2.8.dp.toPx() else 2.2.dp.toPx()),
         )
-        drawCircle(Color(0xFF39D9D5).copy(alpha = .46f), radius * .72f, center, style = Stroke(1.dp.toPx()))
+        drawCircle(PlaygroundTheme.TimberWarm.copy(alpha = .48f), radius * .72f, center, style = Stroke(1.2.dp.toPx()))
 
         fun arrow(dx: Float, dy: Float) {
             val point = Offset(center.x + dx * radius * .48f, center.y + dy * radius * .48f)
@@ -208,10 +208,10 @@ internal fun VirtualJoystick(
             val py = dx
             val tip = Offset(point.x + dx * radius * .105f, point.y + dy * radius * .105f)
             val tail = Offset(point.x - dx * radius * .105f, point.y - dy * radius * .105f)
-            val ink = Color.White.copy(alpha = .78f)
-            drawLine(ink, tail, tip, 2.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f + px * radius * .065f, tip.y - dy * radius * .08f + py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f - px * radius * .065f, tip.y - dy * radius * .08f - py * radius * .065f), 2.dp.toPx(), cap = StrokeCap.Round)
+            val ink = PlaygroundTheme.TimberGold.copy(alpha = .88f)
+            drawLine(ink, tail, tip, 2.2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f + px * radius * .065f, tip.y - dy * radius * .08f + py * radius * .065f), 2.2.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(ink, tip, Offset(tip.x - dx * radius * .08f - px * radius * .065f, tip.y - dy * radius * .08f - py * radius * .065f), 2.2.dp.toPx(), cap = StrokeCap.Round)
         }
         arrow(0f, -1f)
         arrow(0f, 1f)
@@ -223,10 +223,10 @@ internal fun VirtualJoystick(
             center.x + activeSteer * knobTravel,
             center.y - activeMove * knobTravel,
         )
-        drawCircle(Color.Black.copy(alpha = .28f), radius * .30f, Offset(knob.x + 1.dp.toPx(), knob.y + 2.dp.toPx()))
-        drawCircle(Brush.verticalGradient(listOf(Color(0xFFC8E2E5), Color(0xFF677E87))), radius * .28f, knob)
-        drawCircle(Color.White.copy(alpha = .5f), radius * .28f, knob, style = Stroke(1.dp.toPx()))
-        drawCircle(Color.White.copy(alpha = .24f), radius * .10f, Offset(knob.x - radius * .08f, knob.y - radius * .08f))
+        drawCircle(Color.Black.copy(alpha = .34f), radius * .30f, Offset(knob.x + 1.dp.toPx(), knob.y + 2.dp.toPx()))
+        drawCircle(Brush.verticalGradient(listOf(Color(0xFF9DF85A), Color(0xFF389824))), radius * .28f, knob)
+        drawCircle(Color.White.copy(alpha = .65f), radius * .28f, knob, style = Stroke(1.2.dp.toPx()))
+        drawCircle(Color.White.copy(alpha = .32f), radius * .10f, Offset(knob.x - radius * .08f, knob.y - radius * .08f))
     }
 }
 
@@ -241,16 +241,16 @@ internal fun HudActionButton(
     description: String = label ?: "Game action",
     onClick: () -> Unit,
 ) {
-    val accent = Color(0xFF16D9E7)
+    val accent = if (selected) PlaygroundTheme.TimberGold else PlaygroundTheme.MossEmerald
     OutlinedButton(
         onClick = onClick,
         modifier = modifier.height(38.dp).semantics { contentDescription = description },
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 5.dp, vertical = 0.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) Color(0xE51B4C58) else Color(0xE6102630),
-            contentColor = Color.White,
+            containerColor = if (selected) PlaygroundTheme.StoneCardSelected else PlaygroundTheme.StoneDark,
+            contentColor = PlaygroundTheme.TextPrimary,
         ),
-        border = BorderStroke(1.dp, accent.copy(alpha = if (selected) .9f else .52f)),
+        border = BorderStroke(1.2.dp, accent.copy(alpha = if (selected) .95f else .58f)),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -337,77 +337,103 @@ internal fun GameSettingsOverlay(
     onClose: () -> Unit,
 ) {
     Box(
-        modifier = Modifier.fillMaxSize().background(Color(0xB807151C)),
+        modifier = Modifier.fillMaxSize().background(Color(0xBA0D140E)),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(.88f),
             shape = RoundedCornerShape(24.dp),
-            color = Color(0xF0182C35),
-            border = BorderStroke(1.dp, Color(0xFF66E0CB).copy(alpha = .75f)),
-            shadowElevation = 16.dp,
+            color = PlaygroundTheme.StoneCard,
+            border = BorderStroke(1.5.dp, PlaygroundTheme.MossEmerald.copy(alpha = .78f)),
+            shadowElevation = 18.dp,
         ) {
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp).verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("ROPEBOUND · IN GAME", color = Color(0xFF66E0CB), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                        Text("Game settings", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                        Text("TEAM VS TEAM · IN GAME", color = PlaygroundTheme.MossEmerald, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                        Text("Game settings", color = PlaygroundTheme.TextPrimary, fontSize = 21.sp, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
                         onClick = onClose,
                         modifier = Modifier.height(40.dp).semantics { contentDescription = "Close game settings" },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = .55f)),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = PlaygroundTheme.StoneRow, contentColor = PlaygroundTheme.TextPrimary),
+                        border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
                     ) { Text("×", fontSize = 21.sp) }
                 }
 
                 Canvas(modifier = Modifier.fillMaxWidth().height(10.dp)) {
                     val centerY = size.height / 2f
-                    drawLine(Color(0xFF66E0CB).copy(alpha = .55f), Offset(0f, centerY), Offset(size.width, centerY), strokeWidth = 2.dp.toPx())
+                    drawLine(PlaygroundTheme.MossEmerald.copy(alpha = .58f), Offset(0f, centerY), Offset(size.width, centerY), strokeWidth = 2.dp.toPx())
                     val spacing = size.width / 5f
-                    for (index in 1..4) drawCircle(Color(0xFF9DE4E8), 3.dp.toPx(), Offset(spacing * index, centerY))
+                    for (index in 1..4) drawCircle(PlaygroundTheme.TimberGold, 3.dp.toPx(), Offset(spacing * index, centerY))
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Game audio", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Soft game music under voice chat, plus effects", color = Color(0xFFB7CACE), fontSize = 12.sp)
+                        Text("Game audio", color = PlaygroundTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text("Soft game music under voice chat, plus effects", color = PlaygroundTheme.TextSecondary, fontSize = 12.sp)
                     }
-                    Switch(checked = soundEnabled, onCheckedChange = onSoundEnabledChange)
+                    Switch(
+                        checked = soundEnabled,
+                        onCheckedChange = onSoundEnabledChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PlaygroundTheme.StoneDark,
+                            checkedTrackColor = PlaygroundTheme.MossEmerald,
+                        ),
+                    )
                 }
-                Text("Background music · ${(ambienceVolume * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                Text("Background music · ${(ambienceVolume * 100).toInt()}%", color = PlaygroundTheme.TextPrimary, fontSize = 12.sp)
                 Slider(
                     value = ambienceVolume,
                     onValueChange = onAmbienceVolumeChange,
                     enabled = soundEnabled,
                     valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF66E0CB), activeTrackColor = Color(0xFF66E0CB)),
+                    colors = SliderDefaults.colors(
+                        thumbColor = PlaygroundTheme.TimberGold,
+                        activeTrackColor = PlaygroundTheme.MossEmerald,
+                        inactiveTrackColor = PlaygroundTheme.TrackInactive,
+                    ),
                 )
-                Text("Gameplay effects · ${(sfxVolume * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                Text("Gameplay effects · ${(sfxVolume * 100).toInt()}%", color = PlaygroundTheme.TextPrimary, fontSize = 12.sp)
                 Slider(
                     value = sfxVolume,
                     onValueChange = onSfxVolumeChange,
                     enabled = soundEnabled,
                     valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF66E0CB), activeTrackColor = Color(0xFF66E0CB)),
+                    colors = SliderDefaults.colors(
+                        thumbColor = PlaygroundTheme.TimberGold,
+                        activeTrackColor = PlaygroundTheme.MossEmerald,
+                        inactiveTrackColor = PlaygroundTheme.TrackInactive,
+                    ),
                 )
-                Text("HUD transparency · ${(hudOpacity * 100).toInt()}%", color = Color.White, fontSize = 12.sp)
+                Text("HUD transparency · ${(hudOpacity * 100).toInt()}%", color = PlaygroundTheme.TextPrimary, fontSize = 12.sp)
                 Slider(
                     value = hudOpacity,
                     onValueChange = onHudOpacityChange,
                     valueRange = .35f..1f,
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF66E0CB), activeTrackColor = Color(0xFF66E0CB)),
+                    colors = SliderDefaults.colors(
+                        thumbColor = PlaygroundTheme.TimberGold,
+                        activeTrackColor = PlaygroundTheme.MossEmerald,
+                        inactiveTrackColor = PlaygroundTheme.TrackInactive,
+                    ),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Customize HUD", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Move the joystick, jump, and brace controls after closing settings", color = Color(0xFFB7CACE), fontSize = 11.sp)
+                        Text("Customize HUD", color = PlaygroundTheme.TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text("Move the joystick, jump, and brace controls after closing settings", color = PlaygroundTheme.TextSecondary, fontSize = 11.sp)
                     }
-                    Switch(checked = hudEditMode, onCheckedChange = onHudEditModeChange)
+                    Switch(
+                        checked = hudEditMode,
+                        onCheckedChange = onHudEditModeChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PlaygroundTheme.StoneDark,
+                            checkedTrackColor = PlaygroundTheme.MossEmerald,
+                        ),
+                    )
                 }
                 Text(
                     "Voice chat stays connected. Your controls are released while settings are open.",
-                    color = Color(0xFFB7CACE),
+                    color = PlaygroundTheme.TextSecondary,
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(8.dp))
@@ -417,12 +443,23 @@ internal fun GameSettingsOverlay(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = onReset) { Text("Reset audio") }
-                        OutlinedButton(onClick = onResetHud) { Text("Reset HUD") }
+                        OutlinedButton(
+                            onClick = onReset,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PlaygroundTheme.TextPrimary),
+                            border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
+                        ) { Text("Reset audio") }
+                        OutlinedButton(
+                            onClick = onResetHud,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PlaygroundTheme.TextPrimary),
+                            border = BorderStroke(1.dp, PlaygroundTheme.StoneBorder),
+                        ) { Text("Reset HUD") }
                     }
                     Button(
                         onClick = onClose,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66E0CB), contentColor = Color(0xFF082521)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PlaygroundTheme.MossEmerald,
+                            contentColor = PlaygroundTheme.StoneDark,
+                        ),
                     ) { Text("OK · Resume", fontWeight = FontWeight.Bold) }
                 }
             }
@@ -440,10 +477,10 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
             .background(
                 Brush.verticalGradient(
                     colorStops = arrayOf(
-                        0f to Color(0xB307151D),
-                        .30f to Color(0x2607151D),
-                        .62f to Color(0x1607151D),
-                        1f to Color(0xD907151D),
+                        0f to Color(0xB30E1810),
+                        .30f to Color(0x260E1810),
+                        .62f to Color(0x160E1810),
+                        1f to Color(0xD90E1810),
                     ),
                 ),
             )
@@ -455,19 +492,19 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    "SQUADVOICE",
-                    color = Color.White.copy(alpha = .78f),
+                    "ONLINE MULTIPLAYER",
+                    color = PlaygroundTheme.TextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.sp,
                 )
                 Text(
-                    "ROPEBOUND",
+                    "TEAM VS TEAM",
                     modifier = Modifier.graphicsLayer { scaleX = logoPulse; scaleY = logoPulse },
-                    color = Color(0xFF7BF1DC),
-                    fontSize = if (isLandscape) 28.sp else 24.sp,
+                    color = PlaygroundTheme.MossEmerald,
+                    fontSize = if (isLandscape) 26.sp else 22.sp,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 2.5.sp,
+                    letterSpacing = 2.sp,
                 )
             }
 
@@ -476,8 +513,8 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
                     .align(Alignment.CenterHorizontally)
                     .fillMaxWidth(if (isLandscape) .56f else .94f),
                 shape = RoundedCornerShape(22.dp),
-                color = Color(0xD9122730),
-                border = BorderStroke(1.dp, Color(0xFF73E6D7).copy(alpha = .52f)),
+                color = PlaygroundTheme.StoneCard,
+                border = BorderStroke(1.2.dp, PlaygroundTheme.MossEmerald.copy(alpha = .62f)),
                 shadowElevation = 14.dp,
             ) {
                 Column(
@@ -485,11 +522,11 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("LOADING PLAYGROUND", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
+                    Text("LOADING PLAYGROUND", color = PlaygroundTheme.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black, letterSpacing = 1.1.sp)
                     Text(
                         if (worldReady) "Course ready · joining with $teamSize runners…"
                         else "Syncing your squad and setting the bridge…",
-                        color = Color(0xFFC2D8DA),
+                        color = PlaygroundTheme.TextSecondary,
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
@@ -499,22 +536,17 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
                         val barHeight = size.height * .48f
                         drawRoundRect(Color.White.copy(alpha = .18f), Offset.Zero, size, CornerRadius(size.height / 2f))
                         drawRoundRect(
-                            Color(0xFF59E1CB),
+                            PlaygroundTheme.MossEmerald,
                             Offset.Zero,
                             Size(size.width * trackProgress, barHeight),
                             CornerRadius(barHeight / 2f),
                         )
                         val headX = size.width * trackProgress
-                        drawCircle(Color.White.copy(alpha = .92f), barHeight * .52f, Offset(headX.coerceAtMost(size.width - barHeight), size.height / 2f))
-                        val runnerColors = arrayOf(Color(0xFFB9A3FF), Color(0xFFFF927F), Color(0xFF62E2C9), Color(0xFFFFCB67))
-                        for (index in runnerColors.indices) {
-                            val x = size.width * ((runnerTravel + index * .19f) % 1f)
-                            if (x < headX) drawCircle(runnerColors[index], barHeight * .28f, Offset(x, size.height / 2f))
-                        }
+                        drawCircle(PlaygroundTheme.TimberGold, barHeight * .52f, Offset(headX.coerceAtMost(size.width - barHeight), size.height / 2f))
                     }
                     Text(
                         "Stay together to keep the rope steady.",
-                        color = Color(0xFF83E9D8),
+                        color = PlaygroundTheme.MossBright,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
@@ -525,7 +557,7 @@ internal fun MatchLoadingOverlay(teamSize: Int, worldReady: Boolean, logoPulse: 
             Text(
                 if (worldReady) "YOUR TEAM IS READY" else "YOUR TEAM IS GETTING READY",
                 modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = Color.White.copy(alpha = .72f),
+                color = PlaygroundTheme.TextSecondary,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.5.sp,
@@ -582,18 +614,19 @@ internal fun GameControlButton(
     val shieldPath = remember { Path() }
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.semantics {
-            contentDescription = description
-        },
+        modifier = modifier.semantics { contentDescription = description },
         interactionSource = interactionSource,
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (active) Color(0xFF66E0CB) else Color(0xE6102028),
-            contentColor = if (active) Color(0xFF082521) else Color.White,
+            containerColor = if (active) PlaygroundTheme.MossEmerald else PlaygroundTheme.StoneDark,
+            contentColor = if (active) PlaygroundTheme.StoneDark else PlaygroundTheme.TextPrimary,
         ),
-        border = BorderStroke(1.5.dp, if (active) Color.White.copy(alpha = .92f) else Color.White.copy(alpha = .72f)),
+        border = BorderStroke(
+            1.8.dp,
+            if (active) PlaygroundTheme.TimberGold else PlaygroundTheme.StoneBorder,
+        ),
     ) {
         Canvas(Modifier.size(25.dp)) {
-            val ink = if (active) Color(0xFF082521) else Color.White
+            val ink = if (active) PlaygroundTheme.StoneDark else PlaygroundTheme.TimberGold
             val cx = size.width / 2f
             val cy = size.height / 2f
             val stroke = 2.7.dp.toPx()
@@ -627,7 +660,7 @@ internal fun RaceMarker(
     label: String,
     progress: Float,
     modifier: Modifier = Modifier,
-    valueColor: Color = Color(0xFF66E0CB),
+    valueColor: Color = PlaygroundTheme.MossEmerald,
     isTension: Boolean = false,
 ) {
     Row(
@@ -640,14 +673,14 @@ internal fun RaceMarker(
             fontSize = 8.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = .35.sp,
-            color = Color.White.copy(alpha = .82f),
+            color = PlaygroundTheme.TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Clip,
         )
         Text(
             "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
             fontSize = 12.sp,
-            color = if (isTension && progress >= .8f) Color(0xFFFF9B57) else valueColor,
+            color = if (isTension && progress >= .8f) PlaygroundTheme.RivalCoral else valueColor,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -658,6 +691,6 @@ internal fun RaceMarker(
 internal fun HudStatDivider() {
     Box(
         Modifier.padding(horizontal = 5.dp).width(1.dp).height(20.dp)
-            .background(Color(0xFF28C8D5).copy(alpha = .38f)),
+            .background(PlaygroundTheme.StoneBorder.copy(alpha = .52f)),
     )
 }

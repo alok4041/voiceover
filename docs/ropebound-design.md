@@ -4,6 +4,8 @@
 
 This document is the product and implementation reference for Ropebound, the 3D co-op race game inside SquadVoice. The Android client renders a 3D landscape race scene and camera views; the server remains authoritative for movement, hazards, and match snapshots. Match state resets if the token server restarts.
 
+The current code and implemented rules are documented in `docs/ROPEBOUND-GAME-GUIDE.md`. This document records the product direction and a library of future obstacle and progression ideas; an idea below is not implemented unless the guide or source code says so.
+
 The game should open from an active SquadVoice voice room. Players keep talking in that room while they play. The game is a coordinated race where each team controls a chain of toy runners joined by a rope that **must never break**.
 
 ## Game pitch
@@ -12,15 +14,17 @@ Two teams race through dangerous, toy-sized obstacle courses. Every player contr
 
 The fun should come from shouting timing cues, recovering from ridiculous near-falls, and adapting to obstacles together—not from punishing one teammate or relying on random luck.
 
-## Visual format and first implementation
+## Visual format and current direction
 
-- The initial game is 2D, side-on, landscape-oriented, and designed for touch screens. Use readable toy-like silhouettes, layered backgrounds, a clear course line, large hazards, and a rope drawn between every adjacent teammate.
-- Entering the Ropebound lobby or race locks the Android activity to sensor landscape; returning to the voice room restores the activity's previous orientation setting.
-- Ropebound Android UI/client files live in `app/src/main/java/com/squadvoice/app/game/`. Voice UI, LiveKit lifecycle, room service, room API, and microphone controls live in `app/src/main/java/com/squadvoice/app/voice/`. The app shell switches screens, while the voice foreground service/session continues independently when the game UI is shown; the game can therefore run alongside the existing voice chat.
-- The current Android game UI uses Kotlin and Jetpack Compose Canvas for animated characters, ropes, flags, a spike pit, a boulder to jump over, a fragile plank bridge, an open river gap, a wind tunnel, a lava crossing, and the finish arch. River waves and lava flames animate continuously; server-triggered splash and lava-burst particles animate when a runner falls in. Its scenic Training Yard background is stored at `app/src/main/res/drawable-nodpi/ropebound_training_yard_v2.png`; the game draws dynamic course objects over it so their positions stay aligned with physics. Each phone follows its own authenticated player with a smooth side-scrolling camera, while the scenery drifts at a slower parallax rate. It includes team selection, ready state, host-controlled start, coalesced held run/brace controls, jump, checkpoints, finish, results, and a host-controlled rematch. It streams state updates and sends controls; the existing LiveKit session remains connected.
-- The token server has an in-memory Node.js game core and authenticated `/games/*` routes for lobby/team constraints, host start permission, bounded control inputs, server-owned progress, rope spacing, hazard recovery, rematches, and opponent progress filtering. Movement uses acceleration, velocity damping, jump impulse, gravity, and repeated rope-length constraint passes. Falling into the spike pit or open river, landing in lava, or staying on the bridge too long resets the full team into a safe staging lane at its latest checkpoint; a grounded runner bumps off the boulder and must jump over it. Android receives viewer-filtered server-sent events from `/games/events`; physics advances at 20 ticks per second and snapshots stream at about 10 per second.
-- Keep the first version 2D. Make course geometry, runner spacing, obstacle timing, and collision feedback fun before evaluating 3D as a separate future project.
-- Keep the game in the existing Android app so the current LiveKit voice session remains alive while the game screen is shown.
+- Ropebound is a 3D, landscape-first cooperative race for Android touch screens. The client renders a perspective world with readable toy-like runners, an always-attached rope, a clear route, recognizable hazards, and layered scenery.
+- Entering the Ropebound lobby or race locks the Android activity to landscape; returning to the voice room restores its previous orientation setting.
+- The Android game lives in `app/src/main/java/com/squadvoice/app/game/`. `RopeboundGameScreen.kt` owns lobby/race/results composition, input collection, and local camera settings. `Ropebound3DScene.kt` hosts the OpenGL ES 2.0 view; `game/render/` contains procedural geometry and runner/environment drawing. Compose draws the HUD, touch controls, nameplates, settings, and results over the 3D scene.
+- The scene uses a simple world convention: course progress maps along world Z, lane/steer offset along world X, and jump height along world Y. The Android renderer interpolates server snapshots and may predict the local runner for responsive feel; this is visual smoothing only, not an alternate authority for collisions or match outcomes.
+- The race camera is per-device presentation state. Players may drag across the playfield to rotate the view through a full horizontal 360° orbit and tilt up/down within a bounded range. Follow, orbit, and top views are camera presets. Camera movement is not sent to the server and cannot change another player's view or game state. Pitch is bounded so the camera cannot flip through the world.
+- Movement uses a four-direction virtual joystick: up/down control forward/reverse travel; left/right steer across the lane. Both axes can be combined for a diagonal input, which is normalized to prevent faster diagonal movement. Jump and Brace remain separate touch actions. The HUD can be repositioned in its edit mode.
+- The existing app shell keeps the LiveKit voice session and microphone foreground service alive while the game screen is shown. The game does not create a second voice connection.
+- The token server has an in-memory Node.js game core and authenticated `/games/*` routes for lobby/team constraints, host start permission, bounded movement and steering inputs, server-owned progress, rope spacing, hazard recovery, rematches, and opponent progress filtering. Physics advances at 20 ticks per second; snapshots stream over the authenticated WebSocket at about 10 per second. A Render process restart clears in-memory game state.
+- Keep the game inside the existing Android app so players can use the game and squad voice simultaneously.
 
 ## Design pillars
 
@@ -36,13 +40,12 @@ The fun should come from shouting timing cues, recovering from ridiculous near-f
 
 - Exactly two teams race at a time: Team A and Team B.
 - Each team has 1–5 runners; the lobby supports up to 10 players total.
-- At least 2 players (1 on each team) are required to start a race, so a duo can play 1v1.
+- At least 2 active players on each team (4 total) are required to start; every active player must be ready and only the host can start.
 - Every runner is connected to adjacent runners in the team’s ordered rope chain.
 - All active runners on a team must reach the exit for that team to finish.
 - A team wins when its last active runner crosses the exit. The other team’s full race data is hidden during play; show only a low-rate progress marker on the shared track bar.
-- A player who is AFK receives a warning after 15 seconds. If still inactive after a clearly shown grace period, the player becomes a spectator for that round. The rope reconnects the remaining active runners across the skipped position; no rope segment breaks.
-- If a player disconnects, pause or safely freeze their runner for a short reconnect window. If they do not return, let the team choose a checkpoint restart or finish together with that runner spectating.
-- Landscape is the initial target because the race needs space for the whole chain and touch controls.
+- A player whose connection goes offline is removed from the active race chain after the server's offline timeout and is shown as offline/spectating; the remaining active team can continue. A reconnect during a race remains spectating until the next round. AFK-only warnings and kick behavior are future work.
+- Landscape is required for both the lobby and race because the game needs space for the runner chain, camera view, and touch controls.
 
 ## The rope: rules and feedback
 
@@ -57,16 +60,17 @@ The rope links each adjacent pair in the team order. Each link has a comfortable
 
 The MVP should prevent overextension by slowing/blocking the forward runner. Do not yank runners violently, launch players unpredictably, or let the rope slice through hazards. A little extra slack during a jump makes airborne movement feel natural. Never use a “rope health” meter, rope-cutting tools, or any break animation. Environmental fire such as a lava pool is a course hazard and must never damage the rope.
 
-## Runner controls and teamwork actions
+## Runner controls and camera
 
-- **Move:** two large direction buttons or a thumb pad.
-- **Jump:** tap for a normal jump; a short hold may increase height, with a clear maximum.
-- **Brace:** hold to plant the runner and resist a push or stabilize the rope chain.
-- **Team action (optional after the basic controls feel good):** a short, cooldown-limited group call such as “pull together” or “steady”. It should help recover coordination, not provide a speed boost that decides the race by itself.
+- **Four-way joystick:** up/down move forward/backward; left/right steer laterally. Diagonals are accepted and normalized. Releasing the joystick returns both axes to neutral; the server damps velocity.
+- **Jump:** tap while grounded. The server applies a fixed jump impulse; holding does not increase jump height.
+- **Brace:** hold to reduce movement acceleration and resist the wind hazard.
+- **Camera:** drag the visible playfield to orbit horizontally through 360° and tilt within safe limits. Follow, 3D orbit, and top-view buttons restore known camera presets. Camera gestures are local and are not broadcast to teammates.
+- **Team action (future idea):** a short, cooldown-limited group call such as “pull together” or “steady”. It should help recover coordination, not provide a speed boost that decides the race by itself.
 
 Controls need generous touch targets, haptic feedback that can be disabled, and a practice segment. Every essential instruction must also be visual; players must not need to hear voice chat to understand a hazard.
 
-## Obstacle design toolkit
+## Future obstacle design toolkit
 
 Each obstacle should teach or test one main coordination idea. Introduce hazards with safe examples before combining them. Use readable colors, motion previews, and enough warning to react. Obstacles can slow, bump, lift, or reposition runners, but can never detach the rope.
 
@@ -132,7 +136,7 @@ Each obstacle should teach or test one main coordination idea. Introduce hazards
 - A rematch should reuse the course quickly. Later, offer a daily seed or shareable course code so friends can replay the same layout.
 - Do not add pay-to-win items, random paid rewards, or team buffs tied to spending.
 
-## Course and level progression
+## Future course themes and level progression
 
 1. **Training Yard:** safe ledges, a short pit, one checkpoint; teaches movement, jumping, bracing, and rope tension.
 2. **Broken Bridge:** staggered platforms, crumbly tiles, a safe anchor ledge.
@@ -149,47 +153,46 @@ Use the supplied UI concept as a starting point, not as a frozen implementation 
 
 1. **Voice room:** host taps **Play Together** and selects Ropebound. Joining the game must not leave the voice room.
 2. **Lobby:** show room/game status, two team columns, player names, ready/mute state, open slots, host controls, auto-balance, Free Switch, and a course preview. Clearly show team imbalance and the 2–5-per-team limits.
-3. **Ready and countdown:** show missing players or readiness blockers. Start a synchronized countdown only when both teams have at least two players and everyone is ready.
-4. **Race:** show the player’s own lane, all connected teammates, rope tension states, checkpoint, exit, movement controls, Jump, Brace, voice/mute access, and a compact opponent progress bar. Do not reveal the opponent lane or their runner positions.
+3. **Ready and countdown:** show missing players or readiness blockers. Start only when both teams have at least two players, everyone is ready, and the host starts the match.
+4. **Race:** show the player's team and rope, checkpoint, exit, the four-way joystick, Jump, Brace, camera presets, voice/mute access, and a compact opponent progress bar. Let each player rotate their own camera; do not reveal the opponent lane or runner positions.
 5. **Pause/reconnect:** explain who is reconnecting or what caused a pause; keep the rope and voice state clear.
 6. **Results:** show winner, both team times, checkpoint resets, team achievement, and Retry / Next Level / Back to Voice Room. Voice remains connected.
 
 Design for landscape phones first, large touch targets, high contrast, color plus text/icon cues, and dynamic text scaling. Provide settings for haptics, reduced motion, and control layout. Keep important action buttons clear of Android system bars and any existing SquadVoice overlay controls.
 
-## Technical shape
+## System architecture
 
-- **Android app (Kotlin/Compose Canvas):** renders the 2D lobby and race, sends input, displays authoritative snapshots, and keeps existing LiveKit voice controls available. It does not decide positions, rope physics, scores, or winners. Movement is sent while Run/Back is held; Jump and Brace are discrete actions. The artwork is drawn using Compose Canvas vectors rather than external Canva assets.
-- **Token/API service (Node):** verifies the signature, expiry, and room scope of the existing LiveKit participant token before allowing game API calls. The same process currently runs the game simulation; it does not yet confirm the participant is actively connected to LiveKit.
-- **Game server:** authoritative lobby, teams, ready state, movement, collisions, rope spacing, checkpoints, idle cleanup, and win/lose. The current `/games/*` implementation is in-memory and shares the token-server process; it resets on restart and needs persistence, monitoring, and API-wide rate controls before production use. It advances at 20 simulation ticks per second and streams snapshots around 10 times per second.
-- **LiveKit:** voice only. Race voice defaults to team chat; an explicit push-to-talk action can temporarily enable all-player chat if desired.
-- **Redis:** room/lobby metadata with TTL and atomic player-slot reservations. Do not store every physics tick in Redis. Match state may live in game-server memory initially and recover at the last checkpoint after a restart.
-- **Level data:** shared, versioned tile maps/configuration, validated by the game server. Client renders but cannot change collision or scoring rules.
-- **Hosting:** the game server needs an always-on or otherwise reliable WebSocket host. A sleeping free-tier process risks disconnecting a race. Do not assume the existing Render token server’s in-memory maps are durable or that its current service is suitable for real-time simulation without checking.
+- **Android game client:** Kotlin and Jetpack Compose own screens, HUD, four-way joystick, Jump/Brace actions, camera gestures, camera presets, audio, local animation, and snapshot interpolation. `Ropebound3DScene.kt` renders the 3D playground with OpenGL ES 2.0; `game/render/` builds procedural meshes and scene details. The camera and visual effects are local to each phone.
+- **Input contract:** the client sends a monotonically sequenced input containing normalized `move` (forward/back), `steer` (left/right), `jump`, and `brace` over the authenticated WebSocket. Client-side prediction may smooth the local runner between packets, but the client never sends trusted world coordinates or course progress.
+- **Node token/game service:** authenticates the existing LiveKit participant JWT and its room scope, serves HTTP lobby operations, and owns the in-memory game simulation. The game core validates input bounds and sequence numbers, simulates movement/steering, jump/gravity, rope constraints, randomized obstacle positions, checkpoints, rescues, progress, disconnects, and results. It streams viewer-filtered snapshots over WebSocket. A Render process restart clears active match state.
+- **LiveKit:** carries voice only. The current game screen shares the existing room session and does not start a separate voice connection.
+- **World and camera boundary:** server coordinates are gameplay truth. Progress is longitudinal, steering is lateral, and jump is vertical. The camera applies a local view transform after snapshot interpolation; camera yaw/pitch must never be added to networked player physics, collision, team state, or opponent snapshots.
+- **Level and visual data:** obstacle spans and actions come from server snapshots; the client renders matching geometry and effects. Cosmetic scenery may be procedural or image-based, but cannot redefine collision or scoring. New obstacles must be added coherently to server rules, snapshot data, and the 3D renderer.
+- **Scaling work (not implemented):** game state is currently process memory. Persistence, multi-instance coordination, rate controls, and production-scale match hosting require a separate design before claiming durable or horizontally scaled matches.
 
 ### Trust and anti-cheat boundaries
 
-- The client sends only allowed input (move, jump, brace) with a sequence number and timestamp.
+- The client sends only allowed input (`move`, `steer`, `jump`, `brace`) with a sequence number and timing metadata.
 - Server validates membership, match state, input rate, bounds, and timing; clients never send trusted positions, scores, team switches, or finish events.
 - A team switch is decided server-side. Reject switches into a full team. Host actions are authorized server-side.
 - Opponent full snapshots are never sent to a client; send only coarse progress and checkpoint state.
 - Game credentials are short-lived and scoped to the room/match. LiveKit API secrets remain only in server environment variables.
 
-## Build order
+## Implementation and playtest priorities
 
-1. Confirm the product decisions and draw the screen flow.
-2. Prototype single-device movement and rope spacing with two runners; validate that the unbreakable rope feels fair.
-3. Improve Android/server controls and validate the race on multiple phones while voice remains connected.
-4. Add active LiveKit membership checks, reconnect handling, persistence, monitoring, and API-wide rate controls before enabling public matches.
-5. Add checkpoint recovery, disconnect handling, AFK behavior, and race completion.
-6. Build one tutorial and one replayable level with three obstacle families.
-7. Keep LiveKit voice connected while navigating into and out of the game.
-8. Playtest on target Android phones with 4–10 people; tune controls, network tolerance, obstacle readability, and level duration before adding more hazards.
+1. Keep the server `move`/`steer` input contract aligned with the Android four-way joystick. Verify that releasing the joystick neutralizes both axes and that diagonal input is normalized.
+2. Keep camera orbit local to each phone. Test a full horizontal camera rotation and bounded tilt without camera gestures swallowing joystick, Jump, Brace, microphone, or settings input.
+3. Playtest on target Android phones with 4–10 people while voice remains connected. Tune touch feel, camera comfort, network tolerance, obstacle readability, and course duration.
+4. Add new obstacles only by changing server collision/rules and the matching Android 3D geometry/effects together.
+5. Treat persistent match state, multi-instance coordination, stronger rate controls, and production-scale hosting as separate architecture work; the current server keeps game state in memory.
 
-## MVP acceptance criteria
+## Current baseline acceptance criteria
 
 - A game can be launched from an existing voice room and exited back to that room without dropping voice.
 - Two valid teams can form, ready up, start together, and finish together.
 - All connected players control a runner, and every runner remains connected by the unbreakable rope.
+- Each runner can use the four-way joystick for forward/back and lateral steering; camera orbit changes only the local view.
+- The camera can orbit a full horizontal 360° with bounded pitch and usable Follow/Orbit/Top presets.
 - Server authority governs movement, collisions, rope limits, team actions, checkpoint state, progress, and results.
 - The team cannot win until all active runners reach the exit.
 - Falls can be rescued or return the whole team to a checkpoint; nobody is silently abandoned.
@@ -198,16 +201,12 @@ Design for landscape phones first, large touch targets, high contrast, color plu
 - The game remains usable with mute/voice controls and Android touch/navigation UI.
 - Build size and device performance are checked before choosing an engine or adding large art/audio assets.
 
-## Decisions to make before implementation
+## Open design work
 
-- Final title, art style, and whether the runners have distinct but purely cosmetic looks.
-- Whether the initial race always requires 2 vs 2, or supports uneven teams with an explicit fairness rule.
-- How the lobby host is selected and what happens if they disconnect.
-- Reconnect grace duration and whether a match pauses for a reconnect.
-- Whether all-player voice during races is push-to-talk or a separate room option.
-- Whether a small team can continue alone after an opponent disconnects or must restart.
-- Exact Bronze/Silver/Gold thresholds after real playtests.
-- Which game-server hosting and persistent store are approved; assess operating cost and expected concurrent rooms first.
+- Tune camera sensitivity and pitch limits from phone playtests; keep the camera local and avoid full free-flight controls that hide the course.
+- Decide race behavior for host loss, reconnects, and whether a team can continue after a player disconnects; describe current behavior separately until those rules change.
+- Set Bronze/Silver/Gold thresholds after timing real matches.
+- Evaluate persistence, rate limits, and server hosting before increasing concurrent game rooms.
 
 ## Explicit non-goals for the first release
 

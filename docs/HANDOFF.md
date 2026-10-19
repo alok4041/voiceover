@@ -30,6 +30,7 @@ SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio
 - `docs/ropebound-design.md` — game design reference.
 - `docs/ROPEBOUND-GAME-GUIDE.md` — current game rules, API contract, actual-vs-planned behavior, and guidance for independent gameplay changes.
 - Current game transport: lobby actions remain HTTP; live snapshots, controls, and one-second latency probes use `wss://<token-server>/games/realtime?roomCode=...`. Voice continues to use LiveKit unchanged. `ws` is a token-server dependency. Deploy the server and publish a matching Android APK together before players can use this transport; local build success does not mean Render is updated.
+- Ropebound's current game architecture is 3D and landscape-first: Compose provides the HUD and touch controls, while `Ropebound3DScene.kt` hosts the OpenGL ES 2.0 scene and `game/render/` draws its world and runners. The four-way joystick sends forward/backward `move` and left/right `steer`; Jump and Brace are separate actions. The camera supports a full 360-degree horizontal orbit with bounded vertical tilt and Follow/Orbit/Top presets. Camera state is local to each phone and never changes server gameplay or other players' views. The Node game core remains authoritative for movement, physics, collisions, checkpoints, rope constraints, and results. See `docs/ROPEBOUND-GAME-GUIDE.md` for the input contract and playtest guide.
 - `docs/SYSTEM-FLOW.md` — Mermaid diagrams for player/runtime flow and where each part is published.
 - `README.md` — development setup; some URL guidance is stale (see below).
 
@@ -96,6 +97,8 @@ The v1.2.4 release fixes the room-code error, message dismissal, spike readabili
 ### Transfer warning for a separate agent
 
 The v1.2.7 version/site edits and APK are a local release candidate until committed and pushed. The source commits `553af85`, `6e93d84`, and `06c4303` are on `main`. Check GitHub Releases before describing v1.2.7 as published.
+
+Current workspace edits to the 3D scene, joystick/camera controls, renderers, and Ropebound documentation may still be uncommitted and unreleased. Check `git status` before building or publishing; this handoff describes architecture and does not mean those local edits are available in the public APK or Render service.
 
 ## Build and URL behavior
 

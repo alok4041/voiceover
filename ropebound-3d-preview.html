@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Team vs Team — 3D Enchanted Canyon, Stone Cliffs & River Gorge</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      background: #143652; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #glCanvas, #hudCanvas {
+      position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+    }
+    #hudCanvas { pointer-events: none; }
+
+    /* Top Team-vs-Team HUD (No Game Name, No Level Badge) */
+    .top-bar {
+      position: absolute; top: 10px; left: 12px; right: 12px;
+      display: flex; align-items: center; gap: 6px; z-index: 10; pointer-events: none;
+    }
+    .stats-pill {
+      pointer-events: auto;
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(37, 48, 39, 0.92);
+      border: 1.5px solid rgba(104, 227, 72, 0.72);
+      border-radius: 18px; padding: 6px 12px; color: #f6f9f2; font-weight: 800; font-size: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.38);
+    }
+    .stats-pill span.lbl { font-size: 8.5px; color: #c8d6c2; letter-spacing: 0.05em; margin-right: 4px; }
+    .stats-pill .v-team { color: #68e348; font-size: 13px; }
+    .stats-pill .v-rivals { color: #ff6e7a; font-size: 13px; }
+    .stats-pill .v-tension { color: #ffca42; font-size: 13px; }
+    .div { width: 1px; height: 18px; background: rgba(110, 130, 104, 0.55); }
+    .spacer { flex: 1; }
+    .hud-btn {
+      pointer-events: auto;
+      height: 38px; min-width: 38px; padding: 0 11px;
+      border-radius: 19px; border: 1.4px solid rgba(104, 227, 72, 0.62);
+      background: rgba(28, 36, 30, 0.92); color: #f6f9f2; font-weight: 800; font-size: 11px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      cursor: pointer; transition: 0.15s;
+    }
+    .hud-btn.active {
+      background: rgba(45, 61, 47, 0.96); border-color: #ffca42; color: #ffca42;
+      box-shadow: 0 0 12px rgba(104, 227, 72, 0.35);
+    }
+
+    /* 4-Way Movable Virtual Joystick & Action Controls */
+    .stick-zone {
+      position: absolute; left: 24px; bottom: 20px; width: 118px; height: 118px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(52,66,54,0.95), rgba(24,32,25,0.90));
+      border: 2.4px solid rgba(104, 227, 72, 0.85);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.48);
+      z-index: 10; touch-action: none; cursor: grab;
+    }
+    .stick-ring {
+      position: absolute; inset: 16px; border-radius: 50%;
+      border: 1.2px solid rgba(217, 138, 54, 0.52); pointer-events: none;
+    }
+    .stick-knob {
+      position: absolute; left: 50%; top: 50%; width: 36px; height: 36px;
+      margin-left: -18px; margin-top: -18px; border-radius: 50%;
+      background: linear-gradient(180deg, #9df85a, #389824);
+      border: 1.5px solid rgba(255,255,255,0.7);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.45); pointer-events: none;
+    }
+    .action-btn {
+      position: absolute; bottom: 28px; width: 58px; height: 58px; border-radius: 50%;
+      border: 2px solid #ffca42;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 11px; cursor: pointer; z-index: 10;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.48);
+    }
+    #jumpBtn { right: 98px; background: #68e348; color: #1c241e; }
+    #braceBtn { right: 28px; background: rgba(28, 36, 30, 0.92); color: #ffca42; border-color: rgba(110, 130, 104, 0.85); }
+    #braceBtn.active { background: #68e348; color: #1c241e; border-color: #ffca42; }
+
+    /* HUD Edit Pill */
+    .hud-edit-pill {
+      position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      background: rgba(37, 48, 39, 0.95); border: 1.5px solid #68e348;
+      border-radius: 99px; padding: 6px 16px; display: none; align-items: center; gap: 12px;
+      color: #9bf65a; font-size: 11px; font-weight: 800; z-index: 20;
+    }
+    .hud-edit-pill.open { display: inline-flex; }
+    .hud-edit-pill button { background: none; border: none; font-weight: 900; cursor: pointer; font-size: 11px; }
+
+    /* Enchanted Stone & Moss Game Settings Modal */
+    .modal-backdrop {
+      position: absolute; inset: 0; background: rgba(13, 20, 14, 0.76);
+      display: none; align-items: center; justify-content: center; z-index: 30;
+    }
+    .modal-backdrop.open { display: flex; }
+    .settings-card {
+      width: min(88vw, 680px); max-height: 88vh; overflow-y: auto;
+      background: rgba(37, 48, 39, 0.96);
+      border: 1.8px solid rgba(104, 227, 72, 0.8);
+      border-radius: 24px; padding: 18px 22px; color: #f6f9f2;
+      box-shadow: 0 18px 42px rgba(0,0,0,0.65);
+    }
+    .settings-head { display: flex; align-items: center; justify-content: space-between; }
+    .settings-sub { color: #68e348; font-size: 10px; font-weight: 800; letter-spacing: 1.2px; }
+    .settings-title { font-size: 22px; font-weight: 800; margin-top: 2px; }
+    .close-btn {
+      height: 38px; width: 46px; border-radius: 19px; background: rgba(26, 34, 27, 0.9);
+      border: 1px solid rgba(110, 130, 104, 0.8); color: #f6f9f2; font-size: 20px; cursor: pointer;
+    }
+    .node-divider {
+      height: 14px; display: flex; align-items: center; justify-content: space-evenly;
+      position: relative; margin: 10px 0;
+    }
+    .node-divider::before {
+      content: ""; position: absolute; left: 0; right: 0; height: 2px; background: rgba(104, 227, 72, 0.55);
+    }
+    .node-dot { width: 6px; height: 6px; border-radius: 50%; background: #ffca42; z-index: 1; }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
+    .setting-lbl { font-size: 13px; font-weight: 700; }
+    .setting-desc { font-size: 11px; color: #c8d6c2; margin-top: 2px; }
+    .slider-row { margin: 8px 0 12px; }
+    .slider-row input[type=range] { width: 100%; accent-color: #68e348; cursor: pointer; }
+    .settings-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+    .btn-outline {
+      padding: 8px 14px; border-radius: 99px; background: transparent;
+      border: 1px solid rgba(110, 130, 104, 0.85); color: #f6f9f2; font-weight: 700; cursor: pointer;
+    }
+    .btn-primary {
+      padding: 9px 18px; border-radius: 99px; background: #68e348;
+      border: none; color: #1c241e; font-weight: 900; cursor: pointer;
+    }
+
+    /* Enchanted Stone & Moss Lobby Overlay */
+    .lobby-backdrop {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(16,24,17,0.68), rgba(12,18,13,0.84));
+      display: none; flex-direction: column; padding: 10px 16px; gap: 8px; z-index: 25;
+    }
+    .lobby-backdrop.open { display: flex; }
+    .lobby-header {
+      height: 44px; background: rgba(37, 48, 39, 0.92);
+      border: 1.4px solid rgba(104, 227, 72, 0.58); border-radius: 16px;
+      padding: 0 14px; display: flex; align-items: center; gap: 10px; color: #f6f9f2;
+    }
+    .lobby-teams { display: flex; gap: 12px; flex: 1; min-height: 0; }
+    .team-card {
+      flex: 1; background: rgba(37, 48, 39, 0.90);
+      border: 1.5px solid rgba(110, 130, 104, 0.65); border-radius: 18px;
+      padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .team-card.selected {
+      background: rgba(45, 61, 47, 0.94); border: 2px solid #68e348;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+    }
+    .player-row {
+      height: 32px; background: rgba(26, 34, 27, 0.82);
+      border: 1px solid rgba(110, 130, 104, 0.45); border-radius: 9px;
+      padding: 0 8px; display: flex; align-items: center; gap: 6px; color: #f6f9f2; font-size: 11px;
+    }
+    .ping-pill {
+      background: rgba(155, 246, 90, 0.2); color: #9bf65a;
+      padding: 2px 7px; border-radius: 99px; font-size: 9.5px; font-weight: 800;
+    }
+    .swap-pill {
+      background: linear-gradient(90deg, #d98a36, #68e348); color: #1c241e;
+      padding: 3px 9px; border-radius: 99px; font-size: 9.5px; font-weight: 900; border: none; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="glCanvas"></canvas>
+  <canvas id="hudCanvas"></canvas>
+
+  <div class="top-bar" id="topBar">
+    <div class="stats-pill">
+      <div><span class="lbl">TEAM</span><span class="v-team" id="teamPct">43%</span></div>
+      <div class="div"></div>
+      <div><span class="lbl">RIVALS</span><span class="v-rivals">39%</span></div>
+      <div class="div"></div>
+      <div><span class="lbl">TENSION</span><span class="v-tension" id="tensionPct">18%</span></div>
+    </div>
+    <div class="spacer"></div>
+    <button class="hud-btn active" id="camFollowBtn">Follow</button>
+    <button class="hud-btn" id="cam3DBtn">3D</button>
+    <button class="hud-btn" id="camTopBtn">Top</button>
+    <button class="hud-btn" id="openLobbyBtn">Lobby</button>
+    <button class="hud-btn" id="openSettingsBtn">⚙</button>
+    <button class="hud-btn" id="micBtn">🎙</button>
+  </div>
+
+  <div class="stick-zone" id="stickZone">
+    <div class="stick-ring"></div>
+    <div class="stick-knob" id="stickKnob"></div>
+  </div>
+  <button class="action-btn" id="jumpBtn" title="Jump (Space)">JUMP ↑</button>
+  <button class="action-btn" id="braceBtn" title="Hold Brace (Shift)">BRACE 🛡</button>
+
+  <div class="hud-edit-pill" id="hudEditPill">
+    <span>HUD EDIT · Drag Stick, Jump & Brace</span>
+    <button style="color:#ffca42" id="resetHudInlineBtn">RESET</button>
+    <button style="color:#ffffff" id="doneHudInlineBtn">DONE</button>
+  </div>
+
+  <div class="modal-backdrop" id="settingsModal">
+    <div class="settings-card">
+      <div class="settings-head">
+        <div>
+          <div class="settings-sub">TEAM VS TEAM · IN GAME</div>
+          <div class="settings-title">Game settings</div>
+        </div>
+        <button class="close-btn" id="closeSettingsBtn">×</button>
+      </div>
+      <div class="node-divider">
+        <div class="node-dot"></div><div class="node-dot"></div><div class="node-dot"></div><div class="node-dot"></div>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-lbl">Game audio</div>
+          <div class="setting-desc">Soft game music under voice chat, plus effects</div>
+        </div>
+        <input type="checkbox" checked style="width:20px;height:20px;accent-color:#68e348;" />
+      </div>
+      <div class="slider-row">
+        <div class="setting-lbl" id="musicValLbl">Background music · 51%</div>
+        <input type="range" min="0" max="100" value="51" oninput="document.getElementById('musicValLbl').textContent='Background music · '+this.value+'%'" />
+      </div>
+      <div class="slider-row">
+        <div class="setting-lbl" id="sfxValLbl">Gameplay effects · 64%</div>
+        <input type="range" min="0" max="100" value="64" oninput="document.getElementById('sfxValLbl').textContent='Gameplay effects · '+this.value+'%'" />
+      </div>
+      <div class="slider-row">
+        <div class="setting-lbl" id="hudValLbl">HUD transparency · 88%</div>
+        <input type="range" min="35" max="100" value="88" id="hudAlphaSlider" />
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-lbl">Customize HUD</div>
+          <div class="setting-desc">Move the joystick, jump, and brace controls after closing settings</div>
+        </div>
+        <input type="checkbox" id="hudEditToggle" style="width:20px;height:20px;accent-color:#68e348;" />
+      </div>
+      <div class="settings-foot">
+        <div style="display:flex;gap:8px;">
+          <button class="btn-outline">Reset audio</button>
+          <button class="btn-outline" id="resetHudBtn">Reset HUD</button>
+        </div>
+        <button class="btn-primary" id="resumeGameBtn">OK · Resume</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="lobby-backdrop" id="lobbyModal">
+    <div class="lobby-header">
+      <span style="color:#ffca42;font-weight:900;font-size:12px;letter-spacing:0.6px;">TEAM VS TEAM</span>
+      <span style="opacity:0.4;">|</span>
+      <span style="font-weight:700;font-size:16px;">Game lobby</span>
+      <div class="spacer"></div>
+      <span style="font-size:10px;color:#68e348;font-weight:700;">Free switch ON</span>
+      <button class="btn-outline" style="padding:5px 10px;font-size:10px;" id="lobbySettingsBtn">⚙ Settings</button>
+      <button class="btn-primary" style="padding:6px 12px;font-size:11px;" id="closeLobbyBtn">Back to Race</button>
+    </div>
+    <div style="text-align:center;color:#c8d6c2;font-size:11px;">At least two runners on each team · Swap players to keep both teams balanced.</div>
+    <div class="lobby-teams">
+      <div class="team-card selected">
+        <div style="text-align:center;font-weight:800;font-size:12px;color:#68e348;">TEAM A <span style="color:#c8d6c2;">· 2/5</span></div>
+        <div class="player-row">
+          <span style="color:#68e348;font-weight:900;">✓</span>
+          <span style="flex:1;">Alex · host</span>
+          <span class="ping-pill">32 ms</span>
+          <button class="swap-pill">Swap</button>
+        </div>
+        <div class="player-row">
+          <span style="color:#68e348;font-weight:900;">✓</span>
+          <span style="flex:1;">Jordan</span>
+          <span class="ping-pill">45 ms</span>
+          <button class="swap-pill">Swap</button>
+        </div>
+        <div style="flex:1;"></div>
+        <button class="btn-outline" style="width:100%;color:#68e348;border-color:rgba(104,227,72,0.5);">Your team</button>
+      </div>
+      <div class="team-card">
+        <div style="text-align:center;font-weight:800;font-size:12px;color:#ffca42;">TEAM B <span style="color:#c8d6c2;">· 2/5</span></div>
+        <div class="player-row">
+          <span style="color:#68e348;font-weight:900;">✓</span>
+          <span style="flex:1;">Sam</span>
+          <span class="ping-pill">38 ms</span>
+          <button class="swap-pill">Swap</button>
+        </div>
+        <div class="player-row">
+          <span style="color:#68e348;font-weight:900;">✓</span>
+          <span style="flex:1;">Morgan</span>
+          <span class="ping-pill">52 ms</span>
+          <button class="swap-pill">Swap</button>
+        </div>
+        <div style="flex:1;"></div>
+        <button class="btn-outline" style="width:100%;">Join team</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;">
+      <button class="btn-outline" style="flex:1;height:42px;background:rgba(45,61,47,0.9);color:#9bf65a;border-color:#68e348;font-weight:800;">✓ Ready · tap to undo</button>
+      <button class="btn-primary" style="flex:1;height:42px;font-size:14px;" id="startRaceFromLobbyBtn">Start race</button>
+    </div>
+  </div>
+
+  <script>
+    const glCanvas = document.getElementById('glCanvas');
+    const hudCanvas = document.getElementById('hudCanvas');
+    const gl = glCanvas.getContext('webgl', { antialias: true });
+    const ctx2d = hudCanvas.getContext('2d');
+
+    const vsSource = `
+      uniform mat4 uMvp;
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      attribute vec3 aColor;
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      varying vec3 vColor;
+      void main() {
+        gl_Position = uMvp * vec4(aPosition, 1.0);
+        vWorldPos = aPosition;
+        vNormal = aNormal;
+        vColor = aColor;
+      }
+    `;
+
+    // Multi-Material Procedural GLSL Shader matching Ropebound3DScene.kt
+    const fsSource = `
+      precision mediump float;
+      uniform vec3 uEyePos;
+      uniform float uTime;
+      varying vec3 vWorldPos;
+      varying vec3 vNormal;
+      varying vec3 vColor;
+
+      float hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+
+      float noise3(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+              mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+          mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+              mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+          f.z
+        );
+      }
+
+      void main() {
+        float nLen = length(vNormal);
+        vec3 baseCol = vColor;
+        float dist = length(vWorldPos - uEyePos);
+
+        if (nLen > 0.2) {
+          vec3 N = vNormal / nLen;
+          vec3 V = normalize(uEyePos - vWorldPos);
+          if (dot(N, V) < -0.15) N = -N;
+
+          // 1. Procedural Turquoise Water Caustics & White-Water Foam Rapids
+          bool isWater = (baseCol.b > baseCol.r * 1.35 && baseCol.g > 0.35 && vWorldPos.z < 90.0);
+          if (isWater) {
+            vec2 uv = vWorldPos.xz * 0.55;
+            float w1 = noise3(vec3(uv * 2.2 + vec2(uTime * 0.9, -uTime * 1.4), uTime * 0.5));
+            float w2 = noise3(vec3(uv * 4.5 - vec2(uTime * 1.2, uTime * 0.8), uTime * 0.7));
+            float caustic = smoothstep(0.46, 0.78, w1 * 0.6 + w2 * 0.4);
+            float shoreFoam = smoothstep(4.2, 5.2, abs(vWorldPos.x)) * (1.0 - smoothstep(5.2, 6.8, abs(vWorldPos.x)));
+            float rapids = smoothstep(0.68, 0.84, w1 * 0.55 + w2 * 0.45 + shoreFoam * 0.32);
+            baseCol = mix(vec3(0.04, 0.46, 0.76), vec3(0.14, 0.76, 0.94), caustic);
+            baseCol = mix(baseCol, vec3(0.95, 0.99, 1.0), rapids * 0.88);
+          }
+          // 2. Procedural 3D Ashlar Stone Masonry, Mortar Grooves & Rock Crevices
+          else if (abs(baseCol.r - baseCol.g) < 0.08 && baseCol.r > 0.26 && baseCol.r < 0.78 && vWorldPos.z < 72.0) {
+            float row = floor(vWorldPos.y * 2.4);
+            float bx = fract(vWorldPos.x * 0.85 + mod(row, 2.0) * 0.5);
+            float by = fract(vWorldPos.y * 2.4);
+            float bz = fract(vWorldPos.z * 0.85 + mod(row, 2.0) * 0.5);
+            float mortar = smoothstep(0.05, 0.11, bx) * smoothstep(0.05, 0.11, 1.0 - bx)
+                         * smoothstep(0.06, 0.13, by) * smoothstep(0.06, 0.13, 1.0 - by)
+                         * smoothstep(0.05, 0.11, bz) * smoothstep(0.05, 0.11, 1.0 - bz);
+            float rockGrain = noise3(vWorldPos * 3.2) * 0.24 + noise3(vWorldPos * 9.5) * 0.12;
+            baseCol = baseCol * (0.76 + rockGrain) * (0.62 + 0.38 * mortar);
+            if (N.y > 0.55 && vWorldPos.y > -0.35 && vWorldPos.y < 3.2) {
+              float mossMask = smoothstep(0.42, 0.68, noise3(vWorldPos * 2.4));
+              baseCol = mix(baseCol, vec3(0.32, 0.72, 0.18), mossMask * 0.65);
+            }
+          }
+          // 3. Procedural Weathered Wood Plank Grain
+          else if (baseCol.r > baseCol.g * 1.22 && baseCol.g > baseCol.b * 1.22 && baseCol.r < 0.84) {
+            float grain = sin(vWorldPos.x * 16.0 + noise3(vWorldPos * 4.0) * 5.0) * 0.5 + 0.5;
+            baseCol *= (0.86 + 0.22 * grain);
+          }
+          // 4. Dappled Sunlit Foliage & Moss Turf Micro-Texture
+          else if (baseCol.g > baseCol.r * 1.15 && baseCol.g > baseCol.b * 1.15 && vWorldPos.z < 75.0) {
+            float leafTex = noise3(vWorldPos * 4.2);
+            baseCol = mix(baseCol * 0.84, vec3(min(1.0, baseCol.r * 1.35 + 0.12), min(1.0, baseCol.g * 1.18), baseCol.b * 0.85), leafTex * 0.65);
+          }
+
+          vec3 L = normalize(vec3(0.45, 0.84, -0.32));
+          vec3 H = normalize(L + V);
+          float ndl = dot(N, L);
+          float diffuse = clamp(ndl * 0.54 + 0.46, 0.0, 1.0);
+          diffuse = diffuse * diffuse;
+
+          vec3 skyAmb = vec3(0.74, 0.90, 1.0);
+          vec3 groundAmb = vec3(0.34, 0.52, 0.38);
+          vec3 hemi = mix(groundAmb, skyAmb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+
+          float specPower = isWater ? 42.0 : 24.0;
+          float specStr = isWater ? 0.48 : 0.18;
+          float spec = pow(max(dot(N, H), 0.0), specPower) * specStr;
+          float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.20 * max(N.y + 0.3, 0.0);
+
+          vec3 sunColor = vec3(1.05, 0.99, 0.90);
+          baseCol = baseCol * (hemi * 0.48 + sunColor * diffuse * 0.74) + vec3(spec + rim * 0.72);
+        }
+
+        if (vWorldPos.z < 142.0) {
+          float fogFactor = clamp((dist - 38.0) / 92.0, 0.0, 0.74);
+          vec3 fogColor = mix(vec3(0.56, 0.84, 0.98), vec3(0.38, 0.70, 0.94), clamp(vWorldPos.y / 26.0, 0.0, 1.0));
+          baseCol = mix(baseCol, fogColor, fogFactor * fogFactor);
+        }
+
+        gl_FragColor = vec4(clamp(baseCol, 0.0, 1.0), 1.0);
+      }
+    `;
+
+    function compile(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(prog);
+    const posLoc = gl.getAttribLocation(prog, 'aPosition');
+    const normLoc = gl.getAttribLocation(prog, 'aNormal');
+    const colLoc = gl.getAttribLocation(prog, 'aColor');
+    const mvpLoc = gl.getUniformLocation(prog, 'uMvp');
+    const eyeLoc = gl.getUniformLocation(prog, 'uEyePos');
+    const timeLoc = gl.getUniformLocation(prog, 'uTime');
+    const vbo = gl.createBuffer();
+
+    let meshData = new Float32Array(920000);
+    let meshSize = 0;
+    function resetMesh() { meshSize = 0; }
+    function ensure(n) {
+      if (meshSize + n > meshData.length) {
+        const next = new Float32Array(Math.max(meshData.length * 2, meshSize + n));
+        next.set(meshData);
+        meshData = next;
+      }
+    }
+    function putV(px, py, pz, nx, ny, nz, r, g, b) {
+      const i = meshSize;
+      meshData[i] = px; meshData[i+1] = py; meshData[i+2] = pz;
+      meshData[i+3] = nx; meshData[i+4] = ny; meshData[i+5] = nz;
+      meshData[i+6] = r; meshData[i+7] = g; meshData[i+8] = b;
+      meshSize = i + 9;
+    }
+    function shade(c, f) { return [Math.min(1, c[0]*f), Math.min(1, c[1]*f), Math.min(1, c[2]*f)]; }
+    function tri(a, b, c, col, emissive=false) {
+      ensure(27);
+      let nx = 0, ny = 0, nz = 0;
+      if (!emissive) {
+        const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+        const vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
+        nx = uy*vz - uz*vy; ny = uz*vx - ux*vz; nz = ux*vy - uy*vx;
+        const l = Math.hypot(nx, ny, nz) || 1;
+        nx /= l; ny /= l; nz /= l;
+      }
+      putV(a[0],a[1],a[2], nx,ny,nz, col[0],col[1],col[2]);
+      putV(b[0],b[1],b[2], nx,ny,nz, col[0],col[1],col[2]);
+      putV(c[0],c[1],c[2], nx,ny,nz, col[0],col[1],col[2]);
+    }
+    function quad(a, b, c, d, col, emissive=false) {
+      tri(a, b, c, col, emissive);
+      tri(a, c, d, col, emissive);
+    }
+    function box(cx, cy, cz, w, h, d, col, emissive=false) {
+      const x0 = cx - w*0.5, x1 = cx + w*0.5;
+      const y0 = cy - h*0.5, y1 = cy + h*0.5;
+      const z0 = cz - d*0.5, z1 = cz + d*0.5;
+      quad([x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0], shade(col,1.08), emissive);
+      quad([x0,y0,z1],[x0,y0,z0],[x1,y0,z0],[x1,y0,z1], shade(col,0.68), emissive);
+      quad([x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1], col, emissive);
+      quad([x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0], shade(col,0.88), emissive);
+      quad([x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0], shade(col,0.92), emissive);
+      quad([x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1], shade(col,0.84), emissive);
+    }
+    function bridgePlank(cx, cy, cz, w, th, len, roll, col) {
+      const hw = w*0.5, hl = len*0.5, rise = Math.sin(roll)*hw;
+      const ln = [cx-hw, cy-rise, cz-hl], rn = [cx+hw, cy+rise, cz-hl];
+      const rf = [cx+hw, cy+rise, cz+hl], lf = [cx-hw, cy-rise, cz+hl];
+      const lnb = [ln[0], ln[1]-th, ln[2]], rnb = [rn[0], rn[1]-th, rn[2]];
+      const rfb = [rf[0], rf[1]-th, rf[2]], lfb = [lf[0], lf[1]-th, lf[2]];
+      quad(ln, lf, rf, rn, shade(col, 1.08));
+      quad(lnb, rnb, rfb, lfb, shade(col, 0.62));
+      quad(ln, lnb, lfb, lf, shade(col, 0.86));
+      quad(rn, rf, rfb, rnb, shade(col, 0.80));
+      quad(lnb, ln, rn, rnb, col);
+      quad(lf, lfb, rfb, rf, shade(col, 0.92));
+    }
+    function plane(x0, x1, z0, z1, y, col, emissive=false) {
+      quad([x0,y,z0],[x0,y,z1],[x1,y,z1],[x1,y,z0], col, emissive);
+    }
+    function cone(x, y, z, r, h, col, sides=6, emissive=false) {
+      const tip = [x, y+h, z], base = [x, y, z];
+      for (let s=0; s<sides; s++) {
+        const a0 = 2*Math.PI*s/sides, a1 = 2*Math.PI*(s+1)/sides;
+        const p0 = [x+Math.cos(a0)*r, y, z+Math.sin(a0)*r];
+        const p1 = [x+Math.cos(a1)*r, y, z+Math.sin(a1)*r];
+        tri(p0, tip, p1, shade(col, s%2===0 ? 1.05 : 0.94), emissive);
+        tri(base, p0, p1, shade(col, 0.72), emissive);
+      }
+    }
+    function ellipsoid(cx, cy, cz, rx, ry, rz, col, segs=7, rings=5, emissive=false) {
+      for (let r=0; r<rings; r++) {
+        const v0 = (r/rings - 0.5)*Math.PI, v1 = ((r+1)/rings - 0.5)*Math.PI;
+        const cv0 = Math.cos(v0), sv0 = Math.sin(v0), cv1 = Math.cos(v1), sv1 = Math.sin(v1);
+        for (let s=0; s<segs; s++) {
+          const u0 = 2*Math.PI*s/segs, u1 = 2*Math.PI*(s+1)/segs;
+          const p00 = [cx+rx*cv0*Math.cos(u0), cy+ry*sv0, cz+rz*cv0*Math.sin(u0)];
+          const p10 = [cx+rx*cv0*Math.cos(u1), cy+ry*sv0, cz+rz*cv0*Math.sin(u1)];
+          const p11 = [cx+rx*cv1*Math.cos(u1), cy+ry*sv1, cz+rz*cv1*Math.sin(u1)];
+          const p01 = [cx+rx*cv1*Math.cos(u0), cy+ry*sv1, cz+rz*cv1*Math.sin(u0)];
+          quad(p00, p10, p11, p01, col, emissive);
+        }
+      }
+    }
+    function rod(from, to, rFrom, col, sides=6, rTo=rFrom, emissive=false) {
+      const dx = to[0]-from[0], dy = to[1]-from[1], dz = to[2]-from[2];
+      const len = Math.max(0.001, Math.hypot(dx, dy, dz));
+      const ux = dx/len, uy = dy/len, uz = dz/len;
+      let ax = uy, ay = -ux, az = 0;
+      let al = Math.hypot(ax, ay, az);
+      if (al < 0.001) { ax = 1; ay = 0; az = 0; al = 1; }
+      ax /= al; ay /= al;
+      const bx = uy*az - uz*ay, by = uz*ax - ux*az, bz = ux*ay - uy*ax;
+      for (let s=0; s<sides; s++) {
+        const a = 2*Math.PI*s/sides, b = 2*Math.PI*(s+1)/sides;
+        const n0x = ax*Math.cos(a)+bx*Math.sin(a), n0y = ay*Math.cos(a)+by*Math.sin(a), n0z = az*Math.cos(a)+bz*Math.sin(a);
+        const n1x = ax*Math.cos(b)+bx*Math.sin(b), n1y = ay*Math.cos(b)+by*Math.sin(b), n1z = az*Math.cos(b)+bz*Math.sin(b);
+        const p0 = [from[0]+rFrom*n0x, from[1]+rFrom*n0y, from[2]+rFrom*n0z];
+        const p1 = [from[0]+rFrom*n1x, from[1]+rFrom*n1y, from[2]+rFrom*n1z];
+        const p2 = [to[0]+rTo*n1x, to[1]+rTo*n1y, to[2]+rTo*n1z];
+        const p3 = [to[0]+rTo*n0x, to[1]+rTo*n0y, to[2]+rTo*n0z];
+        quad(p0, p2, p1, p0, col, emissive);
+        quad(p0, p3, p2, p0, col, emissive);
+      }
+    }
+
+    function drawStylizedTree(x, z, species, scale, time, baseY=0.0) {
+      const sway = Math.sin(time * 1.6 + x * 0.6 + z * 0.4) * 0.08;
+      if (species === 0) {
+        rod([x, baseY, z], [x + sway*0.4, baseY + 1.85*scale, z], 0.32*scale, [0.38, 0.23, 0.12], 7, 0.20*scale);
+        const fy = baseY + 1.75 * scale;
+        ellipsoid(x + sway, fy + 0.55*scale, z, 1.24*scale, 0.94*scale, 1.24*scale, [0.28, 0.68, 0.22], 7, 5);
+        ellipsoid(x + sway - 0.62*scale, fy + 0.34*scale, z + 0.28*scale, 0.92*scale, 0.76*scale, 0.92*scale, [0.16, 0.48, 0.18], 6, 4);
+        ellipsoid(x + sway + 0.62*scale, fy + 0.42*scale, z - 0.26*scale, 0.94*scale, 0.78*scale, 0.94*scale, [0.34, 0.74, 0.24], 6, 4);
+        ellipsoid(x + sway*1.2, fy + 1.18*scale, z, 0.88*scale, 0.72*scale, 0.88*scale, [0.54, 0.86, 0.24], 6, 4);
+      } else {
+        rod([x, baseY, z], [x + sway*0.3, baseY + 3.10*scale, z], 0.24*scale, [0.36, 0.20, 0.11], 6, 0.10*scale);
+        cone(x + sway*0.35, baseY + 0.55*scale, z, 1.28*scale, 1.45*scale, [0.14, 0.44, 0.24], 7);
+        cone(x + sway*0.65, baseY + 1.38*scale, z, 1.04*scale, 1.32*scale, [0.20, 0.56, 0.28], 7);
+        cone(x + sway*0.95, baseY + 2.15*scale, z, 0.78*scale, 1.20*scale, [0.30, 0.68, 0.32], 7);
+      }
+    }
+
+    function drawStoneArchRuin(cx, baseY, cz, spanZ, height) {
+      const stoneBase = [0.49, 0.48, 0.45], stoneWarm = [0.55, 0.53, 0.49];
+      const mossBright = [0.42, 0.80, 0.18], mossDeep = [0.22, 0.56, 0.14];
+      const colOffset = spanZ * 0.38, rows = 6, rowH = (height * 0.68) / rows;
+      for (const end of [-1, 1]) {
+        const pz = cz + end * colOffset;
+        for (let r=0; r<rows; r++) {
+          const by = baseY + (r + 0.5) * rowH;
+          box(cx + ((r+end)%2)*0.05, by, pz, 1.12, rowH*0.92, 1.18, (r+end)%2===0 ? stoneBase : stoneWarm);
+        }
+      }
+      const archCenterY = baseY + height * 0.65, segs = 8;
+      for (let s=0; s<segs; s++) {
+        const am = Math.PI * (s + 0.5) / segs;
+        const az = cz + Math.cos(am) * colOffset;
+        const ay = archCenterY + Math.sin(am) * (height * 0.32);
+        box(cx, ay, az, 1.08, 0.52, (spanZ/segs)*0.95, s%2===0 ? stoneWarm : shade(stoneBase, 0.92));
+      }
+      const topY = archCenterY + height * 0.36;
+      box(cx, topY, cz, 1.15, 0.62, spanZ * 0.96, stoneBase);
+      ellipsoid(cx, topY + 0.36, cz, 0.72, 0.28, spanZ * 0.50, mossBright, 7, 4);
+      for (let v=-2; v<=2; v++) {
+        const vz = cz + v * (spanZ * 0.18);
+        rod([cx - 0.52, topY + 0.28, vz], [cx - 0.56, topY - 0.55 - Math.abs(v)*0.25, vz], 0.14, v%2===0 ? mossBright : mossDeep, 5, 0.06);
+      }
+    }
+
+    const COURSE_SCALE = 0.80;
+    const obstacles = [
+      { id: 'pit', start: 23, end: 27.5 },
+      { id: 'boulder', start: 36, end: 38.5 },
+      { id: 'river-bridge', start: 43, end: 49 },
+      { id: 'river-gap', start: 56, end: 61 },
+      { id: 'wind-tunnel', start: 67, end: 73.5 },
+      { id: 'lava', start: 84, end: 90.5 },
+    ];
+    // Start right in front of the Timber Trestle Rope Bridge & Ivy Stone Ruins (matching reference view!)
+    const players = [
+      { name: 'Alex',   ping: '32ms', prog: 0.422, lat: -0.22, h: 0, yaw: 0, role: 0, suit: [0.85,0.22,0.18], skin: [0.98,0.78,0.62], hair: [0.18,0.12,0.09] },
+      { name: 'Jordan', ping: '45ms', prog: 0.411, lat:  0.18, h: 0, yaw: 0, role: 1, suit: [0.20,0.60,0.24], skin: [0.96,0.74,0.56], hair: [0.88,0.42,0.14] },
+      { name: 'Sam',    ping: '38ms', prog: 0.400, lat: -0.16, h: 0, yaw: 0, role: 2, suit: [0.42,0.25,0.66], skin: [0.92,0.70,0.54], hair: [0.94,0.96,0.99] },
+      { name: 'Morgan', ping: '52ms', prog: 0.389, lat:  0.24, h: 0, yaw: 0, role: 3, suit: [0.90,0.60,0.15], skin: [0.80,0.54,0.38], hair: [0.42,0.24,0.11] },
+    ];
+
+    let moveIn = 0, steerIn = 0, bracing = false, jumpAt = -999, hudEditMode = false;
+    let camMode = 0, orbitYaw = 0.06, orbitPitch = 0.05;
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.code] = true;
+      if (e.code === 'Space' && (performance.now()/1000 - jumpAt > 1.28)) jumpAt = performance.now()/1000;
+    });
+    window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    document.getElementById('camFollowBtn').onclick = () => { camMode = 0; orbitYaw = 0.06; orbitPitch = 0.05; updateCamBtns(); };
+    document.getElementById('cam3DBtn').onclick = () => { camMode = 1; orbitYaw = 0.56; orbitPitch = 0.14; updateCamBtns(); };
+    document.getElementById('camTopBtn').onclick = () => { camMode = 2; orbitYaw = 0; orbitPitch = 0.45; updateCamBtns(); };
+    function updateCamBtns() {
+      document.getElementById('camFollowBtn').classList.toggle('active', camMode === 0);
+      document.getElementById('cam3DBtn').classList.toggle('active', camMode === 1);
+      document.getElementById('camTopBtn').classList.toggle('active', camMode === 2);
+    }
+
+    const settingsModal = document.getElementById('settingsModal');
+    const lobbyModal = document.getElementById('lobbyModal');
+    const hudEditToggle = document.getElementById('hudEditToggle');
+    const hudEditPill = document.getElementById('hudEditPill');
+    document.getElementById('openSettingsBtn').onclick = () => settingsModal.classList.add('open');
+    document.getElementById('lobbySettingsBtn').onclick = () => settingsModal.classList.add('open');
+    document.getElementById('closeSettingsBtn').onclick = () => settingsModal.classList.remove('open');
+    document.getElementById('resumeGameBtn').onclick = () => {
+      settingsModal.classList.remove('open');
+      hudEditMode = hudEditToggle.checked;
+      hudEditPill.classList.toggle('open', hudEditMode);
+    };
+    document.getElementById('openLobbyBtn').onclick = () => lobbyModal.classList.add('open');
+    document.getElementById('closeLobbyBtn').onclick = () => lobbyModal.classList.remove('open');
+    document.getElementById('startRaceFromLobbyBtn').onclick = () => lobbyModal.classList.remove('open');
+    document.getElementById('doneHudInlineBtn').onclick = () => {
+      hudEditMode = false; hudEditToggle.checked = false; hudEditPill.classList.remove('open');
+    };
+
+    const stickZone = document.getElementById('stickZone');
+    const jumpBtn = document.getElementById('jumpBtn');
+    const braceBtn = document.getElementById('braceBtn');
+    function resetHudPositions() {
+      stickZone.style.left = '24px'; stickZone.style.bottom = '20px'; stickZone.style.top = '';
+      jumpBtn.style.right = '98px'; jumpBtn.style.bottom = '28px'; jumpBtn.style.left = ''; jumpBtn.style.top = '';
+      braceBtn.style.right = '28px'; braceBtn.style.bottom = '28px'; braceBtn.style.left = ''; braceBtn.style.top = '';
+      document.getElementById('hudAlphaSlider').value = 88;
+      applyHudAlpha(0.88);
+    }
+    document.getElementById('resetHudBtn').onclick = resetHudPositions;
+    document.getElementById('resetHudInlineBtn').onclick = resetHudPositions;
+    function applyHudAlpha(a) {
+      document.getElementById('topBar').style.opacity = a;
+      stickZone.style.opacity = a; jumpBtn.style.opacity = a; braceBtn.style.opacity = a;
+    }
+    document.getElementById('hudAlphaSlider').oninput = function() {
+      document.getElementById('hudValLbl').textContent = 'HUD transparency · ' + this.value + '%';
+      applyHudAlpha(this.value / 100);
+    };
+
+    function makeHudDraggable(el) {
+      let dragging = false, ox = 0, oy = 0;
+      el.addEventListener('pointerdown', e => {
+        if (!hudEditMode) return;
+        e.stopPropagation(); dragging = true;
+        const r = el.getBoundingClientRect();
+        ox = e.clientX - r.left; oy = e.clientY - r.top;
+      });
+      window.addEventListener('pointermove', e => {
+        if (!dragging || !hudEditMode) return;
+        el.style.left = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, e.clientX - ox)) + 'px';
+        el.style.top = Math.max(8, Math.min(window.innerHeight - el.offsetHeight - 8, e.clientY - oy)) + 'px';
+        el.style.right = ''; el.style.bottom = '';
+      });
+      window.addEventListener('pointerup', () => { dragging = false; });
+    }
+    makeHudDraggable(stickZone);
+    makeHudDraggable(jumpBtn);
+    makeHudDraggable(braceBtn);
+
+    let draggingOrbit = false, lastMX = 0, lastMY = 0;
+    glCanvas.addEventListener('pointerdown', e => { draggingOrbit = true; lastMX = e.clientX; lastMY = e.clientY; });
+    window.addEventListener('pointermove', e => {
+      if (!draggingOrbit) return;
+      orbitYaw -= (e.clientX - lastMX) * 0.0055;
+      orbitPitch = Math.max(-0.22, Math.min(0.55, orbitPitch + (e.clientY - lastMY) * 0.0042));
+      lastMX = e.clientX; lastMY = e.clientY;
+    });
+    window.addEventListener('pointerup', () => { draggingOrbit = false; });
+
+    const stickKnob = document.getElementById('stickKnob');
+    let stickActive = false;
+    function handleStick(e) {
+      const r = stickZone.getBoundingClientRect();
+      const cx = r.left + r.width/2, cy = r.top + r.height/2;
+      const dx = (e.clientX - cx) / (r.width * 0.36);
+      const dy = (e.clientY - cy) / (r.height * 0.36);
+      const mag = Math.hypot(dx, dy);
+      const s = mag > 1 ? 1/mag : 1;
+      steerIn = dx * s;
+      moveIn = -dy * s;
+      stickKnob.style.transform = `translate(${steerIn * 34}px, ${-moveIn * 34}px)`;
+    }
+    stickZone.addEventListener('pointerdown', e => {
+      if (hudEditMode) return;
+      e.stopPropagation(); stickActive = true; handleStick(e);
+    });
+    window.addEventListener('pointermove', e => { if (stickActive && !hudEditMode) handleStick(e); });
+    window.addEventListener('pointerup', () => {
+      if (stickActive) { stickActive = false; moveIn = 0; steerIn = 0; stickKnob.style.transform = 'translate(0,0)'; }
+    });
+    jumpBtn.addEventListener('pointerdown', e => {
+      if (hudEditMode) return;
+      e.stopPropagation();
+      if (performance.now()/1000 - jumpAt > 1.28) jumpAt = performance.now()/1000;
+    });
+    braceBtn.addEventListener('pointerdown', e => {
+      if (hudEditMode) return;
+      e.stopPropagation(); bracing = true; braceBtn.classList.add('active');
+    });
+    window.addEventListener('pointerup', () => { bracing = false; braceBtn.classList.remove('active'); });
+
+    function perspective(fovy, aspect, near, far) {
+      const f = 1.0 / Math.tan(fovy * Math.PI / 360);
+      const nf = 1 / (near - far);
+      return [
+        f/aspect, 0, 0, 0,
+        0, f, 0, 0,
+        0, 0, (far+near)*nf, -1,
+        0, 0, (2*far*near)*nf, 0
+      ];
+    }
+    function lookAt(ex, ey, ez, cx, cy, cz) {
+      let zx = ex-cx, zy = ey-cy, zz = ez-cz;
+      let zl = Math.hypot(zx,zy,zz) || 1; zx/=zl; zy/=zl; zz/=zl;
+      let xx = zz, xy = 0, xz = -zx;
+      let xl = Math.hypot(xx,xy,xz) || 1; xx/=xl; xz/=xl;
+      let yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+      return [
+        xx, yx, zx, 0,
+        xy, yy, zy, 0,
+        xz, yz, zz, 0,
+        -(xx*ex+xy*ey+xz*ez), -(yx*ex+yy*ey+yz*ez), -(zx*ex+zy*ey+zz*ez), 1
+      ];
+    }
+    function mulMat(a, b) {
+      const out = new Array(16).fill(0);
+      for (let r=0; r<4; r++) {
+        for (let c=0; c<4; c++) {
+          out[c*4+r] = a[0*4+r]*b[c*4+0] + a[1*4+r]*b[c*4+1] + a[2*4+r]*b[c*4+2] + a[3*4+r]*b[c*4+3];
+        }
+      }
+      return out;
+    }
+
+    let lastT = performance.now() / 1000;
+    function frame(nowMs) {
+      const now = nowMs / 1000;
+      const dt = Math.min(0.04, Math.max(0.004, now - lastT));
+      lastT = now;
+
+      if (glCanvas.width !== window.innerWidth || glCanvas.height !== window.innerHeight) {
+        glCanvas.width = hudCanvas.width = window.innerWidth;
+        glCanvas.height = hudCanvas.height = window.innerHeight;
+        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+      }
+
+      let km = moveIn, ks = steerIn;
+      if (keys['KeyW'] || keys['ArrowUp']) km = 1;
+      if (keys['KeyS'] || keys['ArrowDown']) km = -1;
+      if (keys['KeyA'] || keys['ArrowLeft']) ks = -1;
+      if (keys['KeyD'] || keys['ArrowRight']) ks = 1;
+
+      const jAge = now - jumpAt;
+      const jHeight = (jAge >= 0 && jAge <= 1.28) ? Math.max(0, 16*jAge - 12.5*jAge*jAge) : 0;
+      players[0].prog = Math.max(0.05, Math.min(0.98, players[0].prog + km * 0.085 * dt));
+      players[0].lat = Math.max(-1.45, Math.min(1.45, players[0].lat + ks * 2.2 * dt));
+      players[0].h = jHeight;
+      if (Math.hypot(ks, km) > 0.08) {
+        const targetYaw = Math.atan2(ks, km);
+        let diff = (targetYaw - players[0].yaw) % (2*Math.PI);
+        if (diff > Math.PI) diff -= 2*Math.PI;
+        if (diff < -Math.PI) diff += 2*Math.PI;
+        players[0].yaw += diff * (1 - Math.exp(-16 * dt));
+      }
+
+      for (let i=1; i<players.length; i++) {
+        const targetP = players[0].prog - i * 0.012;
+        players[i].prog += (targetP - players[i].prog) * 0.18;
+        players[i].lat += (Math.sin(now*1.5 + i)*0.28 - players[i].lat) * 0.1;
+        players[i].h = Math.max(0, (16*Math.max(0, jAge - i*0.09) - 12.5*Math.pow(Math.max(0, jAge - i*0.09), 2))) * (jAge - i*0.09 < 1.28 && jAge >= i*0.09 ? 1 : 0);
+        players[i].yaw += (players[0].yaw - players[i].yaw) * 0.12;
+      }
+
+      document.getElementById('teamPct').textContent = `${Math.round(players[0].prog * 100)}%`;
+
+      const camProg = players[0].prog;
+      const zAt = (m) => (m - camProg * 100) * COURSE_SCALE;
+
+      resetMesh();
+      // 1. Sky Gradient & Billowy Pure-White Sunlit Cumulus Cloud Banks (Emissive so never grey!)
+      const skyBands = [
+        [0.74, 0.93, 1.00], [0.56, 0.85, 0.99], [0.38, 0.74, 0.96],
+        [0.24, 0.62, 0.92], [0.16, 0.52, 0.88], [0.10, 0.44, 0.82]
+      ];
+      for (let b=0; b<skyBands.length; b++) {
+        const y0 = -36 + b*24, y1 = y0 + 24;
+        quad([-210,y0,152],[210,y0,152],[210,y1,152],[-210,y1,152], skyBands[b], true);
+      }
+      for (let c=0; c<9; c++) {
+        const cx = -76 + c*19 + Math.sin(c*2.1)*3.5, cz = 96 + (c%3)*8, cy = 14.5 + (c%3)*3.2;
+        ellipsoid(cx, cy-0.8, cz+0.2, 8.2, 2.6, 3.2, [0.84, 0.93, 0.99], 8, 5, true);
+        ellipsoid(cx, cy+0.6, cz, 6.4, 3.8, 3.0, [0.98, 0.99, 1.0], 8, 6, true);
+        ellipsoid(cx-4.2, cy-0.2, cz-0.2, 4.6, 2.8, 2.6, [0.98, 0.99, 1.0], 7, 5, true);
+        ellipsoid(cx+4.4, cy, cz-0.2, 4.8, 3.0, 2.6, [0.98, 0.99, 1.0], 7, 5, true);
+      }
+
+      // 2. Jagged Multi-Ridged Distant Alpine Mountains in Atmospheric Blue Haze (No Cones!)
+      for (let i=0; i<11; i++) {
+        const cx = -95 + i*19, cz = 104 + (i%2)*6, hw = 16 + (i%3)*3, mh = 19 + (i%4)*4.5;
+        const col = i%2===0 ? [0.42, 0.64, 0.86] : [0.36, 0.58, 0.82];
+        const apex = [cx, mh, cz], ls = [cx - hw*0.48, mh*0.68, cz-2.2], rs = [cx + hw*0.44, mh*0.62, cz-1.8];
+        const bl = [cx - hw, -0.8, cz-4], bm = [cx + ((i%3)-1)*1.8, -0.8, cz-8.5], br = [cx + hw, -0.8, cz-4];
+        tri(bl, bm, ls, shade(col, 1.06));
+        tri(bm, apex, ls, shade(col, 1.12));
+        tri(bm, rs, apex, shade(col, 0.86));
+        tri(bm, br, rs, shade(col, 0.82));
+      }
+
+      // 3. Twin Sheer Flat-Topped Rocky Cliff Mesas with Lush Forest Canopies & Roaring Waterfalls
+      const drawCliffMesa = (cx, cz, w, h, fallX) => {
+        box(cx, h*0.5 - 0.5, cz, w, h, 16, [0.42, 0.47, 0.54]);
+        box(cx, h - 0.35, cz, w+0.8, 0.75, 16.8, [0.32, 0.68, 0.24]);
+        for (let t=0; t<7; t++) {
+          drawStylizedTree(cx - w*0.40 + t*(w*0.13), cz - 5 + (t%2)*2.4, t%2, 1.15, now, h);
+        }
+        const fz = cz - 8.3;
+        box(fallX, h*0.48, fz, 3.6, h*0.98, 0.45, [0.48, 0.86, 0.98], true);
+        for (let s=-2; s<=2; s++) {
+          const sx = fallX + s*0.68, p = 0.88 + 0.12*Math.sin(now*5.5 + s*1.4);
+          rod([sx, h-0.2, fz-0.15], [sx, -0.75, fz-1.35], 0.34*p, [0.92, 0.98, 1.0], 5, 0.52*p, true);
+        }
+        for (let m=-2; m<=2; m++) {
+          ellipsoid(fallX + m*0.95, 0.15, fz - 1.6, 1.15, 0.95, 1.15, [0.92, 0.98, 1.0], 6, 4, true);
+        }
+      };
+      drawCliffMesa(-21, 58, 24, 11.2, -13.5);
+      drawCliffMesa(23, 68, 26, 12.6, 14.2);
+
+      // 4. Rushing Turquoise Canyon River Gorge Filling the Entire Valley Floor (No Flat Green Lawn!)
+      plane(-48, 48, -26, 108, -1.05, [0.04, 0.34, 0.62]);
+      plane(-48, 48, -26, 108, -0.74, [0.08, 0.58, 0.86]);
+
+      // Submerged River Boulders, Foam Rings & Stepped Mossy Canyon Banks
+      const scrollZ = (camProg * COURSE_SCALE * 14) % 9.5;
+      for (let b=0; b<26; b++) {
+        const side = b%2===0 ? -1 : 1;
+        const bx = side * (6.2 + (b%5)*2.8);
+        const bz = -18 + (b*4.2 - scrollZ + 96) % 96;
+        const sc = 0.72 + (b%3)*0.32;
+        ellipsoid(bx, -0.72, bz, sc*1.35, 0.04, sc*1.25, [0.92, 0.98, 1.0], 6, 3, true);
+        cone(bx, -0.75, bz, sc, 0.55 + (b%2)*0.25, [0.42, 0.45, 0.47], 7);
+      }
+      for (let bk=0; bk<14; bk++) {
+        const side = bk%2===0 ? -1 : 1;
+        const bz = -16 + (bk*7.8 - scrollZ + 96) % 96;
+        const bx = side * (16.5 + (bk%3)*2.6);
+        const bw = 7.5 + (bk%2)*2.4, bh = 2.4 + (bk%3)*1.1, bd = 6.8;
+        box(bx, -0.75 + bh*0.5, bz, bw, bh, bd, [0.46, 0.45, 0.42]);
+        box(bx, -0.75 + bh + 0.14, bz, bw+0.45, 0.32, bd+0.45, [0.38, 0.78, 0.20]);
+        drawStylizedTree(bx - side*1.4, bz, bk%2, 1.18, now, -0.75 + bh + 0.28);
+      }
+
+      // 5. Stepped Mossy Ashlar Stone Causeway, Basalt Columns & Hanging Ivy Vines
+      const cuts = obstacles.filter(o => ['pit','river-bridge','river-gap','lava'].includes(o.id)).map(o => [zAt(o.start), zAt(o.end)]);
+      const stoneDark = [0.42, 0.41, 0.38], stoneMid = [0.50, 0.49, 0.45], stoneWarm = [0.56, 0.54, 0.49];
+      const mossBright = [0.44, 0.82, 0.18], mossMid = [0.30, 0.68, 0.16];
+      const drawTrailSegment = (z0, z1) => {
+        const len = z1 - z0, mz = (z0 + z1) * 0.5;
+        box(0, -0.58, mz, 10.6, 0.88, len, stoneDark);
+        box(0, -0.18, mz, 9.8, 0.42, len, stoneMid);
+        box(0, -0.02, mz, 9.4, 0.10, len, mossMid);
+        for (const s of [-1, 1]) box(s*4.15, 0.05, mz, 1.45, 0.14, len, mossBright);
+        box(0, 0.015, mz, 6.9, 0.05, len, [0.78, 0.58, 0.34]);
+
+        let bz = Math.max(z0, Math.ceil(z0 / 1.85) * 1.85), idx = 0;
+        while (bz + 0.8 < z1) {
+          const cz = bz + 0.45;
+          for (const s of [-1, 1]) {
+            const cliffX = s * 4.85, stepH = (idx % 3 === 0) ? 0.42 : 0.12;
+            box(cliffX, -0.12 + stepH*0.5, cz, 1.25, 0.56 + stepH, 1.68, (idx + (s>0?1:0))%2===0 ? stoneWarm : stoneMid);
+            box(cliffX, 0.18 + stepH, cz, 1.34, 0.14, 1.74, mossBright);
+            const basaltX = s * 5.45;
+            box(basaltX, -0.52, cz + 0.25, 0.92, 0.64, 1.12, stoneDark);
+            ellipsoid(basaltX + s*0.35, -0.72, cz + 0.25, 0.65, 0.03, 0.75, [0.92, 0.98, 1.0], 6, 3, true);
+            if (idx % 2 === 0) {
+              rod([cliffX - s*0.55, 0.16 + stepH, cz], [cliffX - s*0.62, -0.48, cz + 0.12], 0.11, mossMid, 5, 0.05);
+            }
+          }
+          const lane = (idx % 3 === 0) ? -1.85 : (idx % 3 === 1 ? 0 : 1.85);
+          box(lane, 0.028, cz, 1.18, 0.038, 0.82, idx%2===0 ? stoneWarm : stoneMid);
+          bz += 1.85; idx++;
+        }
+      };
+      let rz = -20;
+      for (const [cs, ce] of cuts) {
+        if (cs > rz) drawTrailSegment(rz, cs);
+        rz = Math.max(rz, ce);
+      }
+      if (rz < 95) drawTrailSegment(rz, 95);
+
+      // 6. Ancient Ivy-Covered 3D Stone Ruin Archways & Gnarled Cliff Trees
+      for (let r=0; r<6; r++) {
+        const side = (r % 3 === 0) ? -1 : 1;
+        const rz2 = -6 + (r*14.5 + camProg*COURSE_SCALE*0.4) % 84;
+        if (cuts.some(([cs, ce]) => rz2 >= cs - 2.8 && rz2 <= ce + 2.8)) continue;
+        drawStoneArchRuin(side * 5.35, 0.0, rz2, 3.8, 3.4);
+      }
+      for (let t=0; t<18; t++) {
+        const side = t%2===0 ? -1 : 1;
+        const tz = -10 + (t*5.2 + camProg*COURSE_SCALE*0.35) % 82;
+        if (cuts.some(([cs, ce]) => tz >= cs - 2.2 && tz <= ce + 2.2)) continue;
+        drawStylizedTree(side * (5.1 + (t%2)*0.8), tz, t % 2, 0.92 + (t%3)*0.14, now, 0.05);
+      }
+
+      // 7. 3D Course Hazards (Timber Trestle Rope Bridge, Canyon Rapids, Mossy Ruin Boulders, Wind Totems, Lava)
+      for (const obs of obstacles) {
+        const z1 = zAt(obs.start), z2 = zAt(obs.end), near = Math.min(z1,z2), far = Math.max(z1,z2), span = far - near, mz = (near+far)*0.5;
+        if (obs.id === 'river-bridge' || obs.id === 'river-gap') {
+          for (let f=0; f<=14; f++) {
+            const fx = -14 + (f%7)*4.6 + Math.sin(now*1.4 + f*1.7)*0.65;
+            const fz = near + span * ((now*0.38 + f*0.13) % 1);
+            rod([fx-0.95, -0.71, fz], [fx+0.95, -0.71, fz+0.22], 0.055, [0.94, 0.99, 1.0], 5, 0.055, true);
+          }
+          for (const endZ of [near, far]) {
+            const ls = endZ === near ? -1 : 1;
+            box(0, -0.46, endZ + ls*0.42, 9.6, 0.98, 0.88, [0.48, 0.47, 0.43]);
+            box(0, 0.04, endZ + ls*0.44, 9.8, 0.12, 0.94, [0.42, 0.80, 0.18]);
+          }
+          if (obs.id === 'river-bridge') {
+            const logDark = [0.38, 0.22, 0.11], logWarm = [0.54, 0.32, 0.16], ropeGold = [0.84, 0.66, 0.38];
+            for (const endIdx of [0, 1]) {
+              const ez = endIdx === 0 ? near + 0.18 : far - 0.18, bs = endIdx === 0 ? -1 : 1;
+              for (const s of [-1, 1]) {
+                const px = s * 2.95;
+                rod([px, -0.82, ez], [px, 0.82, ez], 0.22, logDark, 7, 0.19);
+                rod([px, -0.58, ez], [px, 0.02, ez - bs*0.95], 0.14, logWarm, 6);
+                rod([px, -0.52, ez], [s*1.35, 0.04, ez], 0.12, logWarm, 6);
+                for (let w=0; w<=2; w++) ellipsoid(px, -0.18 + w*0.36, ez, 0.27, 0.07, 0.27, ropeGold, 7, 4);
+              }
+            }
+            for (const s of [-1, 1]) {
+              const rx = s * 2.95;
+              for (let st=0; st<16; st++) {
+                const t0 = st/16, t1 = (st+1)/16;
+                const z0 = near+0.18+(span-0.36)*t0, z1b = near+0.18+(span-0.36)*t1;
+                const sag0 = -Math.sin(t0*Math.PI)*0.24, sag1 = -Math.sin(t1*Math.PI)*0.24;
+                rod([rx, 0.72+sag0, z0], [rx, 0.72+sag1, z1b], 0.052, ropeGold, 6);
+                rod([rx*0.82, 0.02+sag0*0.65, z0], [rx*0.82, 0.02+sag1*0.65, z1b], 0.045, shade(ropeGold, 0.82), 5);
+              }
+            }
+            const planks = 13;
+            for (let p=0; p<planks; p++) {
+              const t = (p+0.5)/planks, pz = near + span*t, sag = -Math.sin(t*Math.PI)*0.14;
+              const py = 0.08 + sag + Math.sin(now*2.2 + p*0.68)*0.018;
+              const roll = Math.sin(now*2.7 + p*0.54)*0.028 + (p===6 ? -0.08 : 0);
+              const wood = p%3===0 ? [0.68,0.40,0.19] : (p%3===1 ? [0.58,0.33,0.15] : [0.74,0.45,0.22]);
+              bridgePlank(0, py, pz, 6.2, 0.16, (span/planks)*0.78, roll, wood);
+              if (p % 2 === 0) {
+                for (const s of [-1, 1]) {
+                  rod([s*2.92, py+0.04, pz], [s*2.95, 0.72 - Math.sin(t*Math.PI)*0.24, pz], 0.032, ropeGold, 5);
+                }
+              }
+            }
+            // Tumbling wooden splinter fragments mid-air
+            for (let sp=0; sp<=1; sp++) {
+              const fc = (now*0.75 + sp*0.5) % 1;
+              bridgePlank(sp===0 ? 1.4 : -1.1, Math.max(-0.68, 0.35 - fc*0.95), mz + (sp-0.5)*0.65, 0.72, 0.10, 0.24, now*3.5+sp, logWarm);
+            }
+          }
+        } else if (obs.id === 'wind-tunnel') {
+          for (let st=0; st<4; st++) {
+            const sz = near + span * ((st + 0.5) / 4);
+            box(0, 0.015, sz, 7.2, 0.026, 0.24, [0.46, 0.92, 0.58], true);
+          }
+          for (let m=0; m<=2; m++) {
+            const tz = near + span * (m / 2);
+            for (const s of [-1, 1]) {
+              const tx = s * 4.35;
+              box(tx, 0.12, tz, 0.68, 0.68, 0.68, [0.46, 0.49, 0.47]);
+              box(tx, 0.48, tz, 0.74, 0.12, 0.74, [0.36, 0.76, 0.22]);
+              rod([tx, 0.48, tz], [tx, 2.38, tz], 0.16, [0.52, 0.32, 0.16], 6, 0.11);
+              const hub = [tx - s*0.16, 2.32, tz];
+              for (let b=0; b<3; b++) {
+                const ang = now * 6.5 + m + b * (2*Math.PI/3);
+                rod(hub, [hub[0], hub[1] + Math.sin(ang)*0.78, hub[2] + Math.cos(ang)*0.78], 0.058, [0.92, 0.84, 0.66], 5, 0.025);
+              }
+            }
+          }
+        } else if (obs.id === 'boulder') {
+          cone(0, 0, mz, 1.52, 1.72, [0.46, 0.49, 0.47], 7);
+          cone(-1.85, 0, mz+0.18, 1.05, 1.25, [0.42, 0.45, 0.44], 7);
+          cone(1.88, 0, mz-0.14, 1.08, 1.28, [0.44, 0.47, 0.45], 7);
+          ellipsoid(0, 1.55, mz, 0.85, 0.22, 0.80, [0.36, 0.74, 0.22], 6, 4);
+        } else if (obs.id === 'lava') {
+          plane(-4.2, 4.2, near, far, -0.24, [0.96, 0.32, 0.06], true);
+          for (let f=0; f<6; f++) {
+            cone(-2.5 + f*1.0, -0.26, near + span*((f%3+0.5)/3), 0.36, 0.55 + 0.38*Math.sin(now*4.5+f), [1.0, 0.74, 0.16], 6, true);
+          }
+        }
+      }
+
+      // 8. 360°-Movable 3D Fantasy Squad Runners (Knight, Ranger, Wizard, Explorer) + Braided Hemp Rope
+      const anchors = [];
+      const isMoving = Math.hypot(km, ks) > 0.06;
+      players.forEach((p, idx) => {
+        const px = (idx - 1.5) * 1.28 + p.lat;
+        const pz = (p.prog - camProg) * 100 * COURSE_SCALE;
+        const runPhase = now * (isMoving ? 8.5 : 2.2) + idx * 0.8;
+        const stride = isMoving ? Math.sin(runPhase) * 0.42 : 0;
+        const bob = isMoving ? Math.abs(Math.sin(runPhase)) * 0.07 : Math.sin(now*2.4+idx)*0.02;
+        const py = (p.h / 12) * 2.6 + bob;
+        const cy = Math.cos(p.yaw), sy = Math.sin(p.yaw);
+        const rot = (lx, ly, lz) => [px + lx*cy + lz*sy, py + ly, pz - lx*sy + lz*cy];
+
+        ellipsoid(px, 0.032, pz, 0.54, 0.02, 0.46, [0.10, 0.16, 0.10], 7, 3);
+        if (idx === 0) {
+          for (let s=0; s<10; s++) {
+            const a0 = 2*Math.PI*s/10, a1 = 2*Math.PI*(s+1)/10, rr = 0.58;
+            rod([px+Math.cos(a0)*rr, 0.045, pz+Math.sin(a0)*rr], [px+Math.cos(a1)*rr, 0.045, pz+Math.sin(a1)*rr], 0.024, [0.55, 0.94, 0.32], 4, 0.024, true);
+          }
+        }
+
+        for (const side of [-1, 1]) {
+          const lp = side < 0 ? stride : -stride;
+          rod(rot(side*0.165, 0.64, 0), rot(side*0.175, 0.35, lp*0.45), 0.108, [0.22, 0.26, 0.32], 6, 0.092);
+          rod(rot(side*0.175, 0.35, lp*0.45), rot(side*0.18, 0.10, lp*0.80), 0.088, [0.24, 0.28, 0.36], 6, 0.076);
+          rod(rot(side*0.18, 0.10, lp*0.80), rot(side*0.18, 0.06, lp*0.80+0.16), 0.095, [0.44, 0.25, 0.12], 6, 0.085);
+        }
+
+        ellipsoid(px, py + 0.96, pz, 0.30, 0.36, 0.23, p.suit, 8, 5);
+        const packP = rot(0, 1.02, -0.24);
+        box(packP[0], packP[1], packP[2], 0.38, 0.44, 0.20, [0.58, 0.34, 0.15]);
+
+        for (const side of [-1, 1]) {
+          const armSwing = side < 0 ? -stride*0.9 : stride*0.9;
+          rod(rot(side*0.30, 1.18, 0), rot(side*0.38, 0.95, armSwing*0.4), 0.092, p.suit, 6, 0.08);
+          const hd = rot(side*0.40, 0.76, armSwing*0.8 + 0.1);
+          rod(rot(side*0.38, 0.95, armSwing*0.4), hd, 0.076, shade(p.suit, 0.94), 6, 0.068);
+          ellipsoid(hd[0], hd[1], hd[2], 0.084, 0.084, 0.084, p.skin, 6, 4);
+        }
+
+        const headP = rot(0, 1.60, 0.02);
+        ellipsoid(headP[0], headP[1], headP[2], 0.28, 0.30, 0.27, p.skin, 9, 6);
+        if (p.role === 0) {
+          ellipsoid(headP[0], py+1.72, headP[2], 0.30, 0.22, 0.29, [0.76, 0.81, 0.86], 8, 5);
+          rod(rot(0, 1.92, -0.05), rot(0, 2.08, -0.28), 0.10, [0.90, 0.18, 0.16], 6, 0.06);
+        } else if (p.role === 1) {
+          ellipsoid(headP[0], py+1.75, headP[2], 0.31, 0.24, 0.30, [0.22, 0.62, 0.24], 8, 5);
+        } else if (p.role === 2) {
+          ellipsoid(headP[0], py+1.80, headP[2], 0.48, 0.05, 0.48, [0.36, 0.22, 0.58], 8, 4);
+          cone(headP[0], py+1.80, headP[2], 0.26, 0.58, [0.44, 0.28, 0.68], 7);
+        } else {
+          ellipsoid(headP[0], py+1.76, headP[2], 0.30, 0.18, 0.29, p.hair, 8, 5);
+        }
+
+        anchors.push(rot(0, 0.92, -0.36));
+      });
+
+      for (let i=0; i<anchors.length-1; i++) {
+        const a0 = anchors[i], a1 = anchors[i+1];
+        let prev = a0;
+        for (let st=1; st<=8; st++) {
+          const t = st / 8;
+          const cur = [
+            a0[0] + (a1[0]-a0[0])*t,
+            a0[1] + (a1[1]-a0[1])*t - Math.sin(t*Math.PI)*0.20,
+            a0[2] + (a1[2]-a0[2])*t
+          ];
+          rod(prev, cur, 0.044, st%2===0 ? [0.88, 0.72, 0.44] : [0.68, 0.52, 0.28], 6);
+          prev = cur;
+        }
+      }
+
+      const topBlend = camMode === 2 ? 1.0 : 0.0;
+      const baseR = 7.2 + (15.5 - 7.2) * topBlend;
+      const baseH = 3.35 + (17.8 - 3.35) * topBlend;
+      const focusX = -1.5 * 1.28 + players[0].lat;
+      const focusY = (players[0].h / 12) * 2.6;
+      const ex = focusX * 0.72 + Math.sin(orbitYaw) * baseR * Math.cos(orbitPitch);
+      const ey = Math.max(1.2, focusY * 0.35 + baseH + Math.sin(orbitPitch) * baseR);
+      const ez = -Math.cos(orbitYaw) * baseR * Math.cos(orbitPitch) + 0.6;
+
+      const proj = perspective(56, glCanvas.width / Math.max(1, glCanvas.height), 0.1, 190);
+      const view = lookAt(ex, ey, ez, focusX * 0.88, 1.25 + focusY * 0.45, 4.2);
+      const vp = mulMat(proj, view);
+
+      gl.clearColor(0.28, 0.68, 0.96, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      gl.useProgram(prog);
+      gl.uniformMatrix4fv(mvpLoc, false, new Float32Array(vp));
+      gl.uniform3f(eyeLoc, ex, ey, ez);
+      gl.uniform1f(timeLoc, now);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, meshData.subarray(0, meshSize), gl.DYNAMIC_DRAW);
+      const strideBytes = 9 * 4;
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, strideBytes, 0);
+      gl.enableVertexAttribArray(normLoc);
+      gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, strideBytes, 12);
+      gl.enableVertexAttribArray(colLoc);
+      gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, strideBytes, 24);
+      gl.drawArrays(gl.TRIANGLES, 0, meshSize / 9);
+
+      // 60 FPS Synced 2D Nameplates with Player Name + Ping
+      ctx2d.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+      ctx2d.font = 'bold 12px system-ui, sans-serif';
+      players.forEach((p, idx) => {
+        const wx = (idx - 1.5) * 1.28 + p.lat;
+        const wy = 2.46 + (p.h / 12) * 2.6;
+        const wz = (p.prog - camProg) * 100 * COURSE_SCALE;
+        const cx2 = vp[0]*wx + vp[4]*wy + vp[8]*wz + vp[12];
+        const cy2 = vp[1]*wx + vp[5]*wy + vp[9]*wz + vp[13];
+        const cw2 = vp[3]*wx + vp[7]*wy + vp[11]*wz + vp[15];
+        if (cw2 <= 0.2) return;
+        const sx = (cx2/cw2 + 1) * 0.5 * hudCanvas.width;
+        const sy = (1 - cy2/cw2) * 0.5 * hudCanvas.height;
+        const w = 98, h = 24;
+        ctx2d.fillStyle = idx === 0 ? 'rgba(45,61,47,0.94)' : 'rgba(28,36,30,0.88)';
+        ctx2d.beginPath();
+        ctx2d.roundRect(sx - w/2, sy - 24, w, h, 12);
+        ctx2d.fill();
+        ctx2d.strokeStyle = idx === 0 ? '#68e348' : 'rgba(110,130,104,0.8)';
+        ctx2d.lineWidth = idx === 0 ? 1.6 : 1.0;
+        ctx2d.stroke();
+        ctx2d.fillStyle = '#f6f9f2';
+        ctx2d.fillText(p.name, sx - w/2 + 10, sy - 8);
+        ctx2d.fillStyle = '#9bf65a';
+        ctx2d.fillText(p.ping, sx + 12, sy - 8);
+      });
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

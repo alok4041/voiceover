@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -40,6 +39,8 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+
+private val IDENTITY = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
 
 @Composable
 internal fun Ropebound3DScene(
@@ -168,7 +169,7 @@ private fun RopeboundPlayerNameplates(
         val focusX = if (hasLiveTelemetry) {
             telemetry.focusX
         } else if (local != null && localIndex >= 0) {
-            (localIndex - (team.players.size - 1) / 2f) * 1.22f + local.lateralOffset.coerceIn(-1.25f, 1.25f)
+            (localIndex - (team.players.size - 1) / 2f) * 1.28f + local.lateralOffset.coerceIn(-1.45f, 1.45f)
         } else 0f
         val focusY = if (hasLiveTelemetry) {
             telemetry.focusY
@@ -185,8 +186,8 @@ private fun RopeboundPlayerNameplates(
             val pLat = if (hasLiveTelemetry && index < telemetry.playerLat.size) telemetry.playerLat[index] else player.lateralOffset
             val pHeight = if (hasLiveTelemetry && index < telemetry.playerHeight.size) telemetry.playerHeight[index] else player.height
             val z = (pProg - cameraProgress) * 100f * COURSE_SCALE
-            val x = (index - (team.players.size - 1) / 2f) * 1.22f + pLat.coerceIn(-1.25f, 1.25f)
-            val y = 2.42f + (pHeight / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
+            val x = (index - (team.players.size - 1) / 2f) * 1.28f + pLat.coerceIn(-1.45f, 1.45f)
+            val y = 2.46f + (pHeight / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
             worldPt[0] = x; worldPt[1] = y; worldPt[2] = z; worldPt[3] = 1f
             Matrix.multiplyMV(clip, 0, viewProjection, 0, worldPt, 0)
             if (clip[3] <= 0.2f) return@forEachIndexed
@@ -197,9 +198,9 @@ private fun RopeboundPlayerNameplates(
             val sy = (1f - ndcY) * 0.5f * size.height
             val ping = player.pingMs?.let { "${it}ms" } ?: "34ms"
             pingPaint.color = when {
-                player.pingMs == null || player.pingMs < 150 -> android.graphics.Color.rgb(119, 232, 189)
-                player.pingMs < 300 -> android.graphics.Color.rgb(255, 209, 102)
-                else -> android.graphics.Color.rgb(255, 133, 133)
+                player.pingMs == null || player.pingMs < 150 -> android.graphics.Color.rgb(155, 246, 90)
+                player.pingMs < 300 -> android.graphics.Color.rgb(255, 202, 66)
+                else -> android.graphics.Color.rgb(255, 110, 122)
             }
             val displayName = player.name.ifBlank { "Player" }.take(12)
             val pad = 7.dp.toPx()
@@ -211,20 +212,18 @@ private fun RopeboundPlayerNameplates(
             if (top < 0f || top + height > size.height) return@forEachIndexed
             val isLocal = player.id == viewerIdentity
             drawRoundRect(
-                if (isLocal) Color(0xEE0D2833) else Color(0xDC102028),
+                if (isLocal) PlaygroundTheme.StoneCardSelected else PlaygroundTheme.StoneDark,
                 topLeft = androidx.compose.ui.geometry.Offset(left, top),
                 size = androidx.compose.ui.geometry.Size(width, height),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(9.dp.toPx()),
             )
-            if (isLocal) {
-                drawRoundRect(
-                    Color(0xFF48F0D8),
-                    topLeft = androidx.compose.ui.geometry.Offset(left, top),
-                    size = androidx.compose.ui.geometry.Size(width, height),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(9.dp.toPx()),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.1.dp.toPx()),
-                )
-            }
+            drawRoundRect(
+                if (isLocal) PlaygroundTheme.MossEmerald else PlaygroundTheme.StoneBorder,
+                topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(width, height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(9.dp.toPx()),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = if (isLocal) 1.4.dp.toPx() else 0.9.dp.toPx()),
+            )
             drawIntoCanvas { canvas ->
                 val baseline = top + (height - (namePaint.ascent() + namePaint.descent())) / 2f
                 canvas.nativeCanvas.drawText(displayName, left + pad, baseline, namePaint)
@@ -277,6 +276,7 @@ private class Ropebound3DRenderer(
     private var colorHandle = 0
     private var mvpHandle = 0
     private var eyePosHandle = 0
+    private var timeHandle = 0
     private var width = 1
     private var height = 1
     private val projection = FloatArray(16)
@@ -296,8 +296,6 @@ private class Ropebound3DRenderer(
     private val runnerTrackers = HashMap<String, RunnerMotionTracker>()
     private val cutStarts = FloatArray(12)
     private val cutEnds = FloatArray(12)
-    private val riverStarts = FloatArray(8)
-    private val riverEnds = FloatArray(8)
     private val anchorPoints = arrayOfNulls<Point3>(12)
 
     fun submit(next: Ropebound3DState) {
@@ -305,7 +303,7 @@ private class Ropebound3DRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.36f, 0.70f, 0.92f, 1f)
+        GLES20.glClearColor(0.28f, 0.68f, 0.96f, 1f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
@@ -326,49 +324,113 @@ private class Ropebound3DRenderer(
             }
         """.trimIndent()
 
+        // Multi-Material Procedural GLSL Shader:
+        // Computes 3D ashlar stone masonry mortar & rock crevices, weathered wood plank grain,
+        // animated turquoise river caustics & white-water foam, dappled sunlit foliage, and atmospheric canyon haze.
         val fragmentShader = """
             precision mediump float;
             uniform vec3 uEyePos;
+            uniform float uTime;
             varying vec3 vWorldPos;
             varying vec3 vNormal;
             varying vec3 vColor;
+
+            float hash3(vec3 p) {
+                p = fract(p * vec3(443.897, 441.423, 437.195));
+                p += dot(p, p.yzx + 19.19);
+                return fract((p.x + p.y) * p.z);
+            }
+
+            float noise3(vec3 p) {
+                vec3 i = floor(p);
+                vec3 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(
+                    mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+                        mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+                    mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+                        mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y),
+                    f.z
+                );
+            }
+
             void main() {
                 float nLen = length(vNormal);
-                vec3 color = vColor;
+                vec3 baseCol = vColor;
                 float dist = length(vWorldPos - uEyePos);
 
                 if (nLen > 0.2) {
                     vec3 N = vNormal / nLen;
                     vec3 V = normalize(uEyePos - vWorldPos);
-                    if (dot(N, V) < -0.15) {
-                        N = -N;
-                    }
-                    vec3 L = normalize(vec3(0.42, 0.82, -0.36));
-                    vec3 H = normalize(L + V);
+                    if (dot(N, V) < -0.15) N = -N;
 
+                    // 1. Procedural Turquoise Water Caustics & White-Water Foam Rapids
+                    bool isWater = (baseCol.b > baseCol.r * 1.35 && baseCol.g > 0.35 && vWorldPos.z < 90.0);
+                    if (isWater) {
+                        vec2 uv = vWorldPos.xz * 0.55;
+                        float w1 = noise3(vec3(uv * 2.2 + vec2(uTime * 0.9, -uTime * 1.4), uTime * 0.5));
+                        float w2 = noise3(vec3(uv * 4.5 - vec2(uTime * 1.2, uTime * 0.8), uTime * 0.7));
+                        float caustic = smoothstep(0.46, 0.78, w1 * 0.6 + w2 * 0.4);
+                        float shoreFoam = smoothstep(4.2, 5.2, abs(vWorldPos.x)) * (1.0 - smoothstep(5.2, 6.8, abs(vWorldPos.x)));
+                        float rapids = smoothstep(0.68, 0.84, w1 * 0.55 + w2 * 0.45 + shoreFoam * 0.32);
+                        baseCol = mix(vec3(0.04, 0.46, 0.76), vec3(0.14, 0.76, 0.94), caustic);
+                        baseCol = mix(baseCol, vec3(0.95, 0.99, 1.0), rapids * 0.88);
+                    }
+                    // 2. Procedural 3D Ashlar Stone Masonry, Mortar Grooves & Rock Crevices
+                    else if (abs(baseCol.r - baseCol.g) < 0.08 && baseCol.r > 0.26 && baseCol.r < 0.78 && vWorldPos.z < 72.0) {
+                        float row = floor(vWorldPos.y * 2.4);
+                        float bx = fract(vWorldPos.x * 0.85 + mod(row, 2.0) * 0.5);
+                        float by = fract(vWorldPos.y * 2.4);
+                        float bz = fract(vWorldPos.z * 0.85 + mod(row, 2.0) * 0.5);
+                        float mortar = smoothstep(0.05, 0.11, bx) * smoothstep(0.05, 0.11, 1.0 - bx)
+                                     * smoothstep(0.06, 0.13, by) * smoothstep(0.06, 0.13, 1.0 - by)
+                                     * smoothstep(0.05, 0.11, bz) * smoothstep(0.05, 0.11, 1.0 - bz);
+                        float rockGrain = noise3(vWorldPos * 3.2) * 0.24 + noise3(vWorldPos * 9.5) * 0.12;
+                        baseCol = baseCol * (0.76 + rockGrain) * (0.62 + 0.38 * mortar);
+                        // Top-edge emerald moss bleed on upward-facing stone ledges
+                        if (N.y > 0.55 && vWorldPos.y > -0.35 && vWorldPos.y < 3.2) {
+                            float mossMask = smoothstep(0.42, 0.68, noise3(vWorldPos * 2.4));
+                            baseCol = mix(baseCol, vec3(0.32, 0.72, 0.18), mossMask * 0.65);
+                        }
+                    }
+                    // 3. Procedural Weathered Wood Plank Grain
+                    else if (baseCol.r > baseCol.g * 1.22 && baseCol.g > baseCol.b * 1.22 && baseCol.r < 0.84) {
+                        float grain = sin(vWorldPos.x * 16.0 + noise3(vWorldPos * 4.0) * 5.0) * 0.5 + 0.5;
+                        baseCol *= (0.86 + 0.22 * grain);
+                    }
+                    // 4. Dappled Sunlit Foliage & Moss Turf Micro-Texture
+                    else if (baseCol.g > baseCol.r * 1.15 && baseCol.g > baseCol.b * 1.15 && vWorldPos.z < 75.0) {
+                        float leafTex = noise3(vWorldPos * 4.2);
+                        baseCol = mix(baseCol * 0.84, vec3(min(1.0, baseCol.r * 1.35 + 0.12), min(1.0, baseCol.g * 1.18), baseCol.b * 0.85), leafTex * 0.65);
+                    }
+
+                    vec3 L = normalize(vec3(0.45, 0.84, -0.32));
+                    vec3 H = normalize(L + V);
                     float ndl = dot(N, L);
-                    float diffuse = clamp(ndl * 0.52 + 0.48, 0.0, 1.0);
+                    float diffuse = clamp(ndl * 0.54 + 0.46, 0.0, 1.0);
                     diffuse = diffuse * diffuse;
 
-                    vec3 skyAmb = vec3(0.76, 0.88, 1.0);
-                    vec3 groundAmb = vec3(0.42, 0.50, 0.38);
+                    vec3 skyAmb = vec3(0.74, 0.90, 1.0);
+                    vec3 groundAmb = vec3(0.34, 0.52, 0.38);
                     vec3 hemi = mix(groundAmb, skyAmb, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
 
-                    float specBase = max(dot(N, H), 0.0);
-                    float spec = pow(specBase, 26.0) * 0.24;
-                    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.18 * max(N.y + 0.3, 0.0);
+                    float specPower = isWater ? 42.0 : 24.0;
+                    float specStr = isWater ? 0.48 : 0.18;
+                    float spec = pow(max(dot(N, H), 0.0), specPower) * specStr;
+                    float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.20 * max(N.y + 0.3, 0.0);
 
-                    vec3 sunColor = vec3(1.04, 0.99, 0.92);
-                    color = vColor * (hemi * 0.46 + sunColor * diffuse * 0.72) + vec3(spec + rim * 0.75);
+                    vec3 sunColor = vec3(1.05, 0.99, 0.90);
+                    baseCol = baseCol * (hemi * 0.48 + sunColor * diffuse * 0.74) + vec3(spec + rim * 0.72);
                 }
 
-                if (vWorldPos.z < 138.0) {
-                    float fogFactor = clamp((dist - 42.0) / 96.0, 0.0, 0.68);
-                    vec3 fogColor = mix(vec3(0.58, 0.82, 0.95), vec3(0.42, 0.72, 0.90), clamp(vWorldPos.y / 28.0, 0.0, 1.0));
-                    color = mix(color, fogColor, fogFactor * fogFactor);
+                // Rich Atmospheric Canyon Mist & Mountain Blue Haze
+                if (vWorldPos.z < 142.0) {
+                    float fogFactor = clamp((dist - 38.0) / 92.0, 0.0, 0.74);
+                    vec3 fogColor = mix(vec3(0.56, 0.84, 0.98), vec3(0.38, 0.70, 0.94), clamp(vWorldPos.y / 26.0, 0.0, 1.0));
+                    baseCol = mix(baseCol, fogColor, fogFactor * fogFactor);
                 }
 
-                gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+                gl_FragColor = vec4(clamp(baseCol, 0.0, 1.0), 1.0);
             }
         """.trimIndent()
 
@@ -378,6 +440,7 @@ private class Ropebound3DRenderer(
         colorHandle = GLES20.glGetAttribLocation(program, "aColor")
         mvpHandle = GLES20.glGetUniformLocation(program, "uMvp")
         eyePosHandle = GLES20.glGetUniformLocation(program, "uEyePos")
+        timeHandle = GLES20.glGetUniformLocation(program, "uTime")
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -430,7 +493,7 @@ private class Ropebound3DRenderer(
 
                 predLateralVel += liveSteer * 20f * dt
                 if (abs(liveSteer) < 0.04f) predLateralVel *= (1f - 9f * dt).coerceAtLeast(0f)
-                predLateralVel = predLateralVel.coerceIn(-2.6f, 2.6f)
+                predLateralVel = predLateralVel.coerceIn(-2.8f, 2.8f)
 
                 var nextMeters = (currentMeters + predForwardVel * dt).coerceIn(0f, 100f)
                 val effectiveGap = if (inLocalJump) 9.7f else 7.5f
@@ -449,7 +512,7 @@ private class Ropebound3DRenderer(
                     predForwardVel = 0f
                 }
                 predLocalProgress = (nextMeters / 100f).coerceIn(0f, 1f)
-                predLocalLat = (predLocalLat + predLateralVel * dt).coerceIn(-1.25f, 1.25f)
+                predLocalLat = (predLocalLat + predLateralVel * dt).coerceIn(-1.45f, 1.45f)
 
                 val rttDelaySec = ((local.pingMs ?: 100).coerceIn(40, 260) / 1_000f) * 0.85f
                 val rttCompensatedServerProgress = (local.progress + (predForwardVel * rttDelaySec) / 100f).coerceIn(0f, 1f)
@@ -474,7 +537,7 @@ private class Ropebound3DRenderer(
         val effectiveLocalHeight = if (local != null) max(localJumpHeight, local.height) else 0f
 
         val targetFocusX = if (local != null && localIndex >= 0) {
-            (localIndex - (current.team.players.size - 1) / 2f) * 1.22f + effectiveLocalLat.coerceIn(-1.25f, 1.25f)
+            (localIndex - (current.team.players.size - 1) / 2f) * 1.28f + effectiveLocalLat.coerceIn(-1.45f, 1.45f)
         } else 0f
         val targetFocusY = (effectiveLocalHeight / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
         smoothFocusX += (targetFocusX - smoothFocusX) * 0.55f
@@ -483,6 +546,7 @@ private class Ropebound3DRenderer(
         telemetry.cameraProgress = smoothProgress
         telemetry.focusX = smoothFocusX
         telemetry.focusY = smoothFocusY
+        telemetry.playerCount = current.team.players.size
 
         reusableMesh.reset()
         buildWorld(
@@ -517,6 +581,7 @@ private class Ropebound3DRenderer(
         GLES20.glUseProgram(program)
         GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvp, 0)
         GLES20.glUniform3f(eyePosHandle, eyeX, eyeY, eyeZ)
+        GLES20.glUniform1f(timeHandle, now)
 
         val strideBytes = 9 * 4
         GLES20.glEnableVertexAttribArray(positionHandle)
@@ -553,7 +618,6 @@ private class Ropebound3DRenderer(
         fun zAt(distanceMeters: Float) = (distanceMeters - cameraProgress * 100f) * COURSE_SCALE
 
         var cutCount = 0
-        var riverCount = 0
         for (i in state.obstacles.indices) {
             val obs = state.obstacles[i]
             val id = obs.id
@@ -566,18 +630,8 @@ private class Ropebound3DRenderer(
                     cutCount++
                 }
             }
-            if ((id == "river-bridge" || id == "river-gap") && riverCount < riverStarts.size) {
-                val rs = s.coerceAtLeast(-26f)
-                val re = e.coerceAtMost(106f)
-                if (re > rs) {
-                    riverStarts[riverCount] = rs
-                    riverEnds[riverCount] = re
-                    riverCount++
-                }
-            }
         }
 
-        // Insertion sort primitive arrays (<= 6 elements, 0 allocations)
         for (i in 1 until cutCount) {
             val ks = cutStarts[i]; val ke = cutEnds[i]
             var j = i - 1
@@ -587,35 +641,14 @@ private class Ropebound3DRenderer(
             }
             cutStarts[j + 1] = ks; cutEnds[j + 1] = ke
         }
-        for (i in 1 until riverCount) {
-            val ks = riverStarts[i]; val ke = riverEnds[i]
-            var j = i - 1
-            while (j >= 0 && riverStarts[j] > ks) {
-                riverStarts[j + 1] = riverStarts[j]; riverEnds[j + 1] = riverEnds[j]
-                j--
-            }
-            riverStarts[j + 1] = ks; riverEnds[j + 1] = ke
-        }
 
+        // 1. Sky, Sunlit Cumulus Clouds, Jagged Alpine Ranges, Forest Cliff Mesas & Twin Roaring Waterfalls
         drawMountainVista(mesh, time)
 
-        fun drawTerrainLayer(y: Float, color: Rgb) {
-            var cursor = -26f
-            for (i in 0 until riverCount) {
-                val riverNear = riverStarts[i]
-                val riverFar = riverEnds[i]
-                if (riverNear > cursor) mesh.plane(-44f, 44f, cursor, riverNear, y, color)
-                mesh.plane(-44f, -23f, riverNear, riverFar, y, color)
-                mesh.plane(23f, 44f, riverNear, riverFar, y, color)
-                cursor = max(cursor, riverFar)
-            }
-            if (cursor < 106f) mesh.plane(-44f, 44f, cursor, 106f, y, color)
-        }
-        drawTerrainLayer(-0.30f, Rgb(0.24f, 0.52f, 0.22f))
-        drawTerrainLayer(-0.29f, Rgb(0.32f, 0.62f, 0.26f))
+        // 2. Rushing Turquoise Canyon River Gorge & Stepped Mossy Cliff Banks (No Flat Green Lawn!)
+        drawValleySideHills(mesh, cameraProgress, cutCount, cutStarts, cutEnds)
 
-        drawValleySideHills(mesh, cameraProgress, riverCount, riverStarts, riverEnds)
-
+        // 3. Elevated Stepped Ashlar Stone Causeway & Mossy Ledges
         var roadZ = -20f
         for (i in 0 until cutCount) {
             val boundedStart = cutStarts[i].coerceIn(-20f, 96f)
@@ -625,18 +658,10 @@ private class Ropebound3DRenderer(
         }
         if (roadZ < 96f) drawTrail(mesh, roadZ, 96f)
 
-        for (tree in 0 until 26) {
-            val side = if (tree % 2 == 0) -1f else 1f
-            val x = side * (6.6f + (tree % 5) * 2.15f)
-            val z = -10f + (tree * 5.6f + cameraProgress * COURSE_SCALE * 0.35f) % 78f
-            if (overlapsRiver(z, 1.2f, riverCount, riverStarts, riverEnds)) continue
-            val species = tree % 3
-            val scale = 0.86f + (tree % 4) * 0.14f
-            drawStylizedTree(mesh, x, z, species, scale, time)
-        }
+        // 4. Ancient Ivy-Draped Stone Ruin Archways, Gnarled Canopy Trees & Wildflowers
+        drawMeadows(mesh, cameraProgress, time, cutCount, cutStarts, cutEnds)
 
-        drawMeadows(mesh, cameraProgress, time, riverCount, riverStarts, riverEnds)
-
+        // 5. Course Hazards (Timber Trestle Rope Bridge, Canyon Rapids, Stone Ruin Chasm, Mossy Boulders, Lava)
         for (i in state.obstacles.indices) {
             val obstacle = state.obstacles[i]
             val z1 = zAt(obstacle.start)
@@ -693,7 +718,7 @@ private class Ropebound3DRenderer(
             }
 
             val z = (tracker.renderProgress - cameraProgress) * 100f * COURSE_SCALE
-            val x = (playerIndex - (state.team.players.size - 1) / 2f) * 1.22f + tracker.renderLat.coerceIn(-1.25f, 1.25f)
+            val x = (playerIndex - (state.team.players.size - 1) / 2f) * 1.28f + tracker.renderLat.coerceIn(-1.45f, 1.45f)
             val jump = (tracker.renderHeight / 12f).coerceIn(-0.35f, 0.5f) * 2.6f
 
             anchorPoints[playerIndex] = drawRunner(
@@ -717,7 +742,6 @@ private class Ropebound3DRenderer(
                 dt = dt,
             )
         }
-        telemetry.playerCount = playerCount
 
         drawSquadTensionRope(
             mesh = mesh,
@@ -730,22 +754,19 @@ private class Ropebound3DRenderer(
     }
 
     private fun linkProgram(vertexSource: String, fragmentSource: String): Int {
-        val vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
-        val fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
-        return GLES20.glCreateProgram().also { program ->
-            GLES20.glAttachShader(program, vertexShader)
-            GLES20.glAttachShader(program, fragmentShader)
-            GLES20.glLinkProgram(program)
-        }
+        val vertex = compileShader(GLES20.GL_VERTEX_SHADER, vertexSource)
+        val fragment = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
+        val program = GLES20.glCreateProgram()
+        GLES20.glAttachShader(program, vertex)
+        GLES20.glAttachShader(program, fragment)
+        GLES20.glLinkProgram(program)
+        return program
     }
 
-    private fun compileShader(type: Int, source: String): Int =
-        GLES20.glCreateShader(type).also { shader ->
-            GLES20.glShaderSource(shader, source)
-            GLES20.glCompileShader(shader)
-        }
-
-    private companion object {
-        val IDENTITY = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
+    private fun compileShader(type: Int, source: String): Int {
+        val shader = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(shader, source)
+        GLES20.glCompileShader(shader)
+        return shader
     }
 }

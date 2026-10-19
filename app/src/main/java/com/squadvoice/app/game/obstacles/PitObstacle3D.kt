@@ -11,33 +11,32 @@ internal fun buildPitHazard(mesh: TriangleMesh, z1: Float, z2: Float, time: Floa
     val span = (far - near).coerceAtLeast(0.5f)
     val pitPulse = 0.5f + 0.5f * sin(time * 3.6f)
 
-    mesh.plane(-3.85f, 3.85f, near, far, -0.68f, Rgb(0.08f, 0.09f, 0.11f))
-    mesh.box(Point3(-3.75f, -0.32f, midZ), 0.36f, 0.72f, span, Rgb(0.32f, 0.28f, 0.24f))
-    mesh.box(Point3(3.75f, -0.32f, midZ), 0.36f, 0.72f, span, Rgb(0.32f, 0.28f, 0.24f))
-    mesh.box(Point3(0f, -0.32f, near), 7.6f, 0.72f, 0.28f, Rgb(0.38f, 0.31f, 0.24f))
-    mesh.box(Point3(0f, -0.32f, far), 7.6f, 0.72f, 0.28f, Rgb(0.38f, 0.31f, 0.24f))
+    // Wide Stepped Mossy Stone Ruin Chasm
+    mesh.plane(-4.4f, 4.4f, near, far, -0.72f, Rgb(0.09f, 0.11f, 0.09f))
+    mesh.box(Point3(-4.35f, -0.32f, midZ), 0.44f, 0.76f, span, Rgb(0.38f, 0.40f, 0.37f))
+    mesh.box(Point3(4.35f, -0.32f, midZ), 0.44f, 0.76f, span, Rgb(0.38f, 0.40f, 0.37f))
+    mesh.box(Point3(0f, -0.32f, near), 8.8f, 0.76f, 0.34f, Rgb(0.44f, 0.46f, 0.43f))
+    mesh.box(Point3(0f, -0.32f, far), 8.8f, 0.76f, 0.34f, Rgb(0.44f, 0.46f, 0.43f))
 
-    for (crack in 0..4) {
-        val x = -2.6f + crack * 1.3f
-        val crackColor = Rgb(1f, 0.42f + 0.28f * pitPulse, 0.10f)
-        mesh.rod(Point3(x - 0.28f, -0.64f, near + 0.25f), Point3(x + 0.28f, -0.64f, far - 0.25f), 0.045f, crackColor, 5, emissive = true)
-    }
+    // Mossy rim ledges on near & far edges
+    mesh.box(Point3(0f, 0.06f, near - 0.06f), 8.8f, 0.10f, 0.28f, Rgb(0.38f, 0.78f, 0.22f))
+    mesh.box(Point3(0f, 0.06f, far + 0.06f), 8.8f, 0.10f, 0.28f, Rgb(0.38f, 0.78f, 0.22f))
 
     for (row in 0..2) {
         val rowZ = near + span * ((row + 0.5f) / 3f)
         repeat(8) { i ->
-            val x = -2.95f + i * 0.84f + (if (row % 2 == 0) 0f else 0.22f)
-            if (x < 3.25f) {
+            val x = -3.35f + i * 0.94f + (if (row % 2 == 0) 0f else 0.22f)
+            if (x < 3.65f) {
                 val height = 0.86f + ((i * 7 + row * 3) % 3) * 0.14f
-                mesh.cone(x, -0.64f, rowZ, 0.30f, height * 0.72f, Rgb(0.38f, 0.42f, 0.46f), 6)
-                mesh.cone(x, -0.64f + height * 0.62f, rowZ, 0.15f, height * 0.44f, Rgb(0.84f, 0.88f, 0.92f), 6)
+                mesh.cone(x, -0.68f, rowZ, 0.32f, height * 0.72f, Rgb(0.38f, 0.42f, 0.40f), 6)
+                mesh.cone(x, -0.68f + height * 0.62f, rowZ, 0.16f, height * 0.44f, Rgb(0.82f, 0.86f, 0.84f), 6)
             }
         }
     }
 
     for (side in SIDES) {
-        val postX = side * 3.65f
-        mesh.box(Point3(postX, 0.72f, near - 0.25f), 0.22f, 1.44f, 0.22f, Rgb(0.42f, 0.26f, 0.15f))
-        mesh.sphere(Point3(postX, 1.54f, near - 0.25f), 0.16f, Rgb(1f, 0.76f + 0.2f * pitPulse, 0.22f), 7, 5, emissive = true)
+        val postX = side * 4.25f
+        mesh.box(Point3(postX, 0.72f, near - 0.25f), 0.26f, 1.44f, 0.26f, Rgb(0.44f, 0.28f, 0.15f))
+        mesh.sphere(Point3(postX, 1.54f, near - 0.25f), 0.17f, Rgb(1f, 0.76f + 0.2f * pitPulse, 0.22f), 6, 5, emissive = true)
     }
 }

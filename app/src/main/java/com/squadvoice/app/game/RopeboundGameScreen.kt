@@ -853,17 +853,17 @@ private fun RaceContent(
             ) {
                 Row(
                     modifier = Modifier
-                        .background(Color(0xE6102630), RoundedCornerShape(18.dp))
-                        .border(1.dp, Color(0xFF20C7D3).copy(alpha = .65f), RoundedCornerShape(18.dp))
+                        .background(PlaygroundTheme.StoneCard, RoundedCornerShape(18.dp))
+                        .border(1.2.dp, PlaygroundTheme.MossEmerald.copy(alpha = .68f), RoundedCornerShape(18.dp))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(0.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RaceMarker("TEAM", ownTeam.progress, valueColor = Color(0xFF18D9EA))
+                    RaceMarker("TEAM", ownTeam.progress, valueColor = PlaygroundTheme.MossEmerald)
                     HudStatDivider()
-                    RaceMarker("RIVALS", otherTeam.progress, valueColor = Color(0xFFFF6688))
+                    RaceMarker("RIVALS", otherTeam.progress, valueColor = PlaygroundTheme.RivalCoral)
                     HudStatDivider()
-                    RaceMarker("TENSION", ownTeam.ropeTension, valueColor = Color(0xFFFFD34E), isTension = true)
+                    RaceMarker("TENSION", ownTeam.ropeTension, valueColor = PlaygroundTheme.TimberGold, isTension = true)
                 }
                 Spacer(Modifier.weight(1f))
                 HudActionButton(GameHudIcon.Follow, null, selected = cameraMode == 0 && abs(orbitYawOffset) < 0.05f, modifier = Modifier.size(38.dp), description = "Follow camera") {
@@ -898,19 +898,6 @@ private fun RaceContent(
                 )
             }
 
-            if (previewMode) {
-                Text(
-                    "3D PREVIEW · MOVE STICK TO TURN/RUN · DRAG SCREEN TO ORBIT 360°",
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 53.dp)
-                        .background(Color(0xB9102630), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                    color = Color(0xFF9BE9DE),
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = .8.sp,
-                )
-            }
-
             error?.let {
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)
@@ -935,13 +922,13 @@ private fun RaceContent(
                 Surface(
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(.68f).padding(bottom = 18.dp),
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xE8102028),
-                    border = BorderStroke(1.dp, Color(0xFFFFD166).copy(alpha = .8f)),
+                    color = PlaygroundTheme.StoneCard,
+                    border = BorderStroke(1.2.dp, PlaygroundTheme.TimberGold.copy(alpha = .8f)),
                 ) {
                     Text(
                         "SPECTATING · Your squad continues. You can play next round.",
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        color = Color.White,
+                        color = PlaygroundTheme.TextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
@@ -1027,26 +1014,26 @@ private fun RaceContent(
                         Surface(
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
                             shape = RoundedCornerShape(50),
-                            color = Color(0xEE102630),
-                            border = BorderStroke(1.2.dp, Color(0xFF66E0CB)),
+                            color = PlaygroundTheme.StoneCard,
+                            border = BorderStroke(1.2.dp, PlaygroundTheme.MossEmerald),
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text("HUD EDIT · Drag Stick, Jump & Brace", color = Color(0xFF9BE9DE), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("HUD EDIT · Drag Stick, Jump & Brace", color = PlaygroundTheme.MossBright, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     "RESET",
                                     modifier = Modifier.clickable(onClick = onResetHudPositions).padding(horizontal = 4.dp, vertical = 2.dp),
-                                    color = Color(0xFFFFD166),
+                                    color = PlaygroundTheme.TimberGold,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
                                     "DONE",
                                     modifier = Modifier.clickable(onClick = onExitHudEdit).padding(horizontal = 4.dp, vertical = 2.dp),
-                                    color = Color.White,
+                                    color = PlaygroundTheme.TextPrimary,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                 )
