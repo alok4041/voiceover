@@ -911,6 +911,21 @@ private fun RaceContent(
                 )
             }
 
+            val localMeters = ((ownTeam.players.firstOrNull { it.id == viewerIdentity }?.progress ?: ownTeam.progress) * 100f)
+            val nextHazard = state.obstacles.firstOrNull { obs ->
+                obs.end >= localMeters && (obs.start - localMeters) <= 14f
+            }
+            val nextHazardDistance = nextHazard?.let { kotlin.math.max(0f, it.start - localMeters).roundToInt() } ?: 0
+            SquadStatusBanner(
+                surgeActive = ownTeam.surgeActive,
+                upcomingObstacle = nextHazard,
+                distanceMeters = nextHazardDistance,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 54.dp)
+                    .graphicsLayer { alpha = hudOpacity },
+            )
+
             error?.let {
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)

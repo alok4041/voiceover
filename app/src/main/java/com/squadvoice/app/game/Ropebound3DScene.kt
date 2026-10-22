@@ -830,6 +830,10 @@ private class Ropebound3DRenderer(
             val z1 = zAt(obstacle.start)
             val z2 = zAt(obstacle.end)
             if (max(z1, z2) < -22f || min(z1, z2) > 105f) continue
+            val nearEdge = min(z1, z2)
+            if (nearEdge - 1.15f in -18f..95f) {
+                drawHazardWarningTelegraph(mesh, nearEdge - 1.15f, obstacle.action, time, qualityTier)
+            }
             when (obstacle.id) {
                 "pit" -> buildPitHazard(mesh, z1, z2, time, qualityTier)
                 "boulder" -> buildBoulderHazard(mesh, z1, z2, time, qualityTier)
@@ -901,6 +905,7 @@ private class Ropebound3DRenderer(
                 localMoveInput = if (isLocalPlayer) liveMove else 0f,
                 localSteerInput = if (isLocalPlayer) liveSteer else 0f,
                 surgeActive = state.team.surgeActive,
+                ropeTension = state.team.ropeTension,
                 time = time,
                 dt = dt,
             )

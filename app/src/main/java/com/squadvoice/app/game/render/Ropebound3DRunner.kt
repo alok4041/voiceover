@@ -62,6 +62,7 @@ internal fun drawRunner(
     localMoveInput: Float,
     localSteerInput: Float,
     surgeActive: Boolean,
+    ropeTension: Float = 0f,
     time: Float,
     dt: Float,
 ): Point3 {
@@ -87,6 +88,8 @@ internal fun drawRunner(
     val effectiveVz = if (isLocalPlayer && inputSpeed > 0.08f) localMoveInput * 9.8f else vz
     val planarSpeed = max(hypot(effectiveVx, effectiveVz), playerVelocity * 0.68f)
     val isMoving = planarSpeed > 0.18f && !bracing
+    val highTensionStrain = ropeTension > 0.80f
+    val celebrating = renderProgress >= 0.985f && grounded && !bracing
 
     val targetYaw = when {
         isLocalPlayer && inputSpeed > 0.08f -> atan2(localSteerInput, localMoveInput)
@@ -100,13 +103,15 @@ internal fun drawRunner(
     val turnAlpha = 1f - kotlin.math.exp(-16f * dt)
     tracker.smoothYaw += angleDiff * turnAlpha
 
+    val strainWobble = if (highTensionStrain && isMoving) sin(time * 18f + index) * 0.06f else 0f
     val targetLean = when {
         bracing -> -0.20f
         jumping -> 0.14f
+        highTensionStrain && isMoving -> -0.14f + strainWobble
         isMoving -> (planarSpeed / 10f).coerceIn(0.06f, 0.24f)
         else -> 0f
     }
-    val targetBank = (-effectiveVx * 0.045f).coerceIn(-0.20f, 0.20f)
+    val targetBank = (-effectiveVx * 0.045f + strainWobble * 0.6f).coerceIn(-0.22f, 0.22f)
     tracker.smoothLean += (targetLean - tracker.smoothLean) * 0.32f
     tracker.smoothBank += (targetBank - tracker.smoothBank) * 0.32f
 
@@ -126,13 +131,14 @@ internal fun drawRunner(
         else -> 0f
     }
     val bob = when {
+        celebrating -> abs(sin(time * 6.5f + index)) * 0.22f
         bracing -> -0.14f
         isMoving && grounded -> abs(sin(runPhase)) * 0.08f
-        else -> sin(time * 2.4f + index) * 0.02f
+        else -> sin(time * 2.8f + index) * 0.032f
     }
     val baseY = jump + bob
 
-    // Ground contact shadow + readability rings (Local player emerald ring / Bracing golden shield ring / Surge aura)
+    // Ground contact shadow + readability rings (Local player emerald ring / Bracing golden shield ring / Surge aura / High-tension coral ring)
     val shadowScale = (1f - (jump / 3.5f).coerceIn(0f, 0.55f))
     mesh.withMaterial(MatId.VERTEX_COLOR) {
         mesh.ellipsoid(
@@ -144,9 +150,10 @@ internal fun drawRunner(
             8,
             4,
         )
-        if (isLocalPlayer || surgeActive || bracing) {
+        if (isLocalPlayer || surgeActive || bracing || highTensionStrain) {
             val ringColor = when {
                 bracing -> Rgb(1.0f, 0.82f, 0.24f)
+                highTensionStrain -> Rgb(1.0f, 0.38f, 0.28f)
                 surgeActive -> Rgb(0.45f, 0.98f, 0.42f)
                 else -> Rgb(0.55f, 0.94f, 0.32f)
             }
@@ -158,7 +165,7 @@ internal fun drawRunner(
                 mesh.rod(
                     Point3(x + cos(a0).toFloat() * ringR, 0.035f, z + sin(a0).toFloat() * ringR),
                     Point3(x + cos(a1).toFloat() * ringR, 0.035f, z + sin(a1).toFloat() * ringR),
-                    if (bracing) 0.032f else 0.024f,
+                    if (bracing || highTensionStrain) 0.032f else 0.024f,
                     ringColor,
                     5,
                     emissive = true,
@@ -178,6 +185,16 @@ internal fun drawRunner(
         } else if (jumping) {
             val arcPuffR = 0.12f + 0.04f * sin(time * 8f + index)
             mesh.sphere(Point3(x, (baseY - 0.14f).coerceAtLeast(0.08f), z - 0.18f), arcPuffR, Rgb(0.92f, 0.98f, 1.0f), 5, 4, emissive = true)
+        }
+
+        // High-tension waist harness strain sparks when rope is near max limit
+        if (highTensionStrain) {
+            for (sp in 0..1) {
+                val a = time * 12f + index * 2f + sp * PI.toFloat()
+                val sx = x + cos(a) * 0.36f
+                val sz = z + sin(a) * 0.36f
+                mesh.sphere(Point3(sx, baseY + 0.92f, sz), 0.045f, Rgb(1.0f, 0.64f, 0.22f), 5, 4, emissive = true)
+            }
         }
 
         // Squad Surge speed-trail ribbons streaming behind each runner
@@ -253,17 +270,31 @@ internal fun drawRunner(
             mesh.rod(pose.p(-0.22f, 1.31f, -0.24f), pose.p(0.22f, 1.31f, -0.24f), 0.08f, Rgb(0.84f, 0.28f, 0.22f), 7)
         }
 
-        // Swinging Arms & Hands
+        // Swinging Arms & Hands (with Victory Cheer & Idle Wave Animation)
         for (side in SIDES) {
+            val isWaveArm = side > 0f && (!isMoving && !jumping && !bracing)
             val armSwing = when {
+                celebrating -> 0.58f + sin(time * 9f + side) * 0.18f
                 jumping -> 0.48f
                 bracing -> -0.22f
                 isMoving -> if (side < 0f) -stride * 0.95f else stride * 0.95f
-                else -> sin(time * 2.2f + index + side) * 0.04f
+                else -> sin(time * 2.4f + index + side) * 0.06f
             }
             val shoulder = pose.p(side * 0.30f, 1.18f, 0f)
-            val elbow = pose.p(side * 0.38f, 0.95f + abs(armSwing) * 0.12f, armSwing * 0.42f - 0.04f)
-            val hand = pose.p(side * 0.40f, 0.76f + max(0f, armSwing) * 0.24f, armSwing * 0.82f + 0.12f)
+            val elbow = if (celebrating) {
+                pose.p(side * 0.42f, 1.36f, 0.08f)
+            } else if (isWaveArm && sin(time * 1.4f + index) > 0.55f) {
+                pose.p(side * 0.40f, 1.28f, 0.08f)
+            } else {
+                pose.p(side * 0.38f, 0.95f + abs(armSwing) * 0.12f, armSwing * 0.42f - 0.04f)
+            }
+            val hand = if (celebrating) {
+                pose.p(side * (0.44f + sin(time * 10f + index) * 0.08f), 1.62f, 0.14f)
+            } else if (isWaveArm && sin(time * 1.4f + index) > 0.55f) {
+                pose.p(side * (0.42f + sin(time * 8f) * 0.07f), 1.50f, 0.16f)
+            } else {
+                pose.p(side * 0.40f, 0.76f + max(0f, armSwing) * 0.24f, armSwing * 0.82f + 0.12f)
+            }
             mesh.rod(shoulder, elbow, 0.095f, suit, 7, 0.082f)
             mesh.rod(elbow, hand, 0.078f, suit.shade(0.95f), 7, 0.068f)
             mesh.sphere(hand, 0.085f, skin, 7, 5)
@@ -321,7 +352,7 @@ internal fun drawSquadTensionRope(
     surgeActive: Boolean,
     time: Float,
 ) {
-    val highTension = ropeTension > 0.82f
+    val highTension = ropeTension > 0.78f
     val ropeMat = if (surgeActive || highTension) MatId.VERTEX_COLOR else MatId.WOOD
 
     for (index in 0 until anchorCount - 1) {
@@ -347,7 +378,7 @@ internal fun drawSquadTensionRope(
             val segments = 9
             for (step in 1..segments) {
                 val t = step.toFloat() / segments
-                val vib = if (ropeTension > 0.7f) sin(time * 28f + step * 1.4f) * 0.018f else 0f
+                val vib = if (ropeTension > 0.7f) sin(time * 28f + step * 1.4f) * 0.022f else 0f
                 val current = Point3(
                     anchor0.x + (anchor1.x - anchor0.x) * t,
                     anchor0.y + (anchor1.y - anchor0.y) * t - sin(t * PI).toFloat() * sag + vib,
@@ -356,12 +387,37 @@ internal fun drawSquadTensionRope(
                 mesh.rod(
                     from = previous,
                     to = current,
-                    radiusFrom = 0.046f,
+                    radiusFrom = if (highTension) 0.038f else 0.046f,
                     color = if (step % 2 == 0) ropeColor else ropeAccent,
                     sides = 6,
                     emissive = surgeActive || highTension,
                 )
                 previous = current
+            }
+        }
+
+        // Midpoint rope fray sparks on high tension & flowing energy orb on Squad Surge
+        if (highTension || surgeActive) {
+            val midX = (anchor0.x + anchor1.x) * 0.5f
+            val midY = (anchor0.y + anchor1.y) * 0.5f - sag
+            val midZ = (anchor0.z + anchor1.z) * 0.5f
+            mesh.withMaterial(MatId.VERTEX_COLOR) {
+                if (highTension) {
+                    val knotR = 0.072f + 0.024f * pulse
+                    mesh.sphere(Point3(midX, midY, midZ), knotR, Rgb(1.0f, 0.72f, 0.20f), 6, 4, emissive = true)
+                    for (sp in 0..2) {
+                        val sa = time * 14f + sp * (2f * PI.toFloat() / 3f)
+                        val sx = midX + cos(sa) * 0.16f
+                        val sy = midY + sin(sa) * 0.14f
+                        mesh.sphere(Point3(sx, sy, midZ), 0.034f, Rgb(1.0f, 0.90f, 0.32f), 4, 3, emissive = true)
+                    }
+                } else {
+                    val flowT = (time * 1.8f + index * 0.35f) % 1f
+                    val fx = anchor0.x + (anchor1.x - anchor0.x) * flowT
+                    val fy = anchor0.y + (anchor1.y - anchor0.y) * flowT - sin(flowT * PI).toFloat() * sag
+                    val fz = anchor0.z + (anchor1.z - anchor0.z) * flowT
+                    mesh.sphere(Point3(fx, fy, fz), 0.068f, Rgb(0.72f, 1.0f, 0.54f), 6, 4, emissive = true)
+                }
             }
         }
     }

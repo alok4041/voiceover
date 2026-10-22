@@ -223,8 +223,29 @@ internal fun VirtualJoystick(
             center.x + activeSteer * knobTravel,
             center.y - activeMove * knobTravel,
         )
+        val stickMag = hypot(activeSteer, activeMove).coerceIn(0f, 1f)
+        if (stickMag > 0.08f) {
+            val angleDeg = (kotlin.math.atan2(-activeMove, activeSteer) * 180f / PI.toFloat())
+            val arcColor = if (stickMag > 0.88f) PlaygroundTheme.TimberGold else PlaygroundTheme.MossEmerald
+            drawArc(
+                color = arcColor.copy(alpha = 0.85f),
+                startAngle = angleDeg - 38f,
+                sweepAngle = 76f,
+                useCenter = false,
+                topLeft = Offset(center.x - radius * 0.88f, center.y - radius * 0.88f),
+                size = Size(radius * 1.76f, radius * 1.76f),
+                style = Stroke(width = 3.2.dp.toPx(), cap = StrokeCap.Round),
+            )
+        }
         drawCircle(Color.Black.copy(alpha = .34f), radius * .30f, Offset(knob.x + 1.dp.toPx(), knob.y + 2.dp.toPx()))
-        drawCircle(Brush.verticalGradient(listOf(Color(0xFF9DF85A), Color(0xFF389824))), radius * .28f, knob)
+        drawCircle(
+            Brush.verticalGradient(
+                if (stickMag > 0.88f) listOf(Color(0xFFFFDF5A), Color(0xFF68E348))
+                else listOf(Color(0xFF9DF85A), Color(0xFF389824)),
+            ),
+            radius * .28f,
+            knob,
+        )
         drawCircle(Color.White.copy(alpha = .65f), radius * .28f, knob, style = Stroke(1.2.dp.toPx()))
         drawCircle(Color.White.copy(alpha = .32f), radius * .10f, Offset(knob.x - radius * .08f, knob.y - radius * .08f))
     }
@@ -708,6 +729,8 @@ internal fun RaceMarker(
     valueColor: Color = PlaygroundTheme.MossEmerald,
     isTension: Boolean = false,
 ) {
+    val clamped = progress.coerceIn(0f, 1f)
+    val effectiveColor = if (isTension && clamped >= .8f) PlaygroundTheme.RivalCoral else valueColor
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -723,12 +746,97 @@ internal fun RaceMarker(
             overflow = TextOverflow.Clip,
         )
         Text(
-            "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+            "${(clamped * 100).toInt()}%",
             fontSize = 12.sp,
-            color = if (isTension && progress >= .8f) PlaygroundTheme.RivalCoral else valueColor,
+            color = effectiveColor,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
+        if (isTension) {
+            Canvas(Modifier.width(24.dp).height(6.dp)) {
+                drawRoundRect(
+                    Color.White.copy(alpha = 0.18f),
+                    Offset.Zero,
+                    size,
+                    CornerRadius(size.height / 2f),
+                )
+                drawRoundRect(
+                    effectiveColor,
+                    Offset.Zero,
+                    Size(size.width * clamped, size.height),
+                    CornerRadius(size.height / 2f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SquadStatusBanner(
+    surgeActive: Boolean,
+    upcomingObstacle: RopeboundObstacle?,
+    distanceMeters: Int,
+    modifier: Modifier = Modifier,
+) {
+    if (!surgeActive && upcomingObstacle == null) return
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (surgeActive) {
+            Row(
+                modifier = Modifier
+                    .background(Color(0xDD1A3820), RoundedCornerShape(14.dp))
+                    .border(1.2.dp, PlaygroundTheme.MossEmerald, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "⚡ SQUAD SURGE 1.2x",
+                    color = PlaygroundTheme.MossBright,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.5.sp,
+                )
+            }
+        }
+        if (upcomingObstacle != null) {
+            val actionTag = when (upcomingObstacle.action) {
+                "brace" -> "HOLD BRACE"
+                "run" -> "SPRINT ACROSS"
+                else -> "JUMP AHEAD"
+            }
+            val obsLabel = when (upcomingObstacle.id) {
+                "pit" -> "Spike Pit"
+                "boulder" -> "Boulder"
+                "river-bridge" -> "Rope Bridge"
+                "river-gap" -> "River Gorge"
+                "wind-tunnel" -> "Wind Tunnel"
+                "lava" -> "Lava Fissure"
+                else -> "Hazard"
+            }
+            val pillAccent = when (upcomingObstacle.action) {
+                "brace" -> Color(0xFF4CE8D8)
+                "run" -> PlaygroundTheme.MossEmerald
+                else -> PlaygroundTheme.TimberGold
+            }
+            Row(
+                modifier = Modifier
+                    .background(PlaygroundTheme.StoneCard, RoundedCornerShape(14.dp))
+                    .border(1.1.dp, pillAccent.copy(alpha = 0.85f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "$actionTag · $obsLabel (${distanceMeters}m)",
+                    color = pillAccent,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 

@@ -419,9 +419,9 @@ export class RopeboundGameCore {
 
         const bridge = room.hazards.find((item) => item.id === RIVER_BRIDGE.id);
         const onCrumblyTiles = bridge && player.x >= bridge.start && player.x <= bridge.end;
-        if (onCrumblyTiles) {
+        if (onCrumblyTiles && Math.abs(player.vx) < 1.2) {
           player.crumblyEnteredAt ??= now;
-          if (now - player.crumblyEnteredAt >= 800) {
+          if (now - player.crumblyEnteredAt >= 950) {
             this.#recoverTeam(room, team, now, 'The rope bridge broke beneath a runner.', 'bridge-break', player.x / COURSE_LENGTH);
             break;
           }
@@ -437,7 +437,7 @@ export class RopeboundGameCore {
             room.notice = `${player.name} landed in the lava! Jump across it.`;
           }
           player.lavaEnteredAt ??= now;
-          if (now - player.lavaEnteredAt >= 400) {
+          if (now - player.lavaEnteredAt >= 480) {
             this.#recoverTeam(room, team, now, `${player.name} landed in the lava.`, 'lava-burst', player.x / COURSE_LENGTH);
             break;
           }
@@ -686,7 +686,7 @@ export class RopeboundGameCore {
         const leader = members[index - 1];
         const runner = members[index];
         const airborne = !leader.grounded || !runner.grounded;
-        const effectiveMaxGap = MAX_ROPE_GAP + (airborne ? 2.2 : 0);
+        const effectiveMaxGap = MAX_ROPE_GAP + (airborne ? 2.6 : 0);
         const verticalGap = (leader.y - runner.y) * 0.35;
         const horizontalLimit = Math.sqrt(Math.max(4, effectiveMaxGap ** 2 - verticalGap ** 2));
         const gap = leader.x - runner.x;
@@ -700,12 +700,13 @@ export class RopeboundGameCore {
           runner.vx = sharedVelocity;
         } else if (gap > horizontalLimit) {
           const stretch = gap - horizontalLimit;
-          const leaderPull = !leader.grounded && runner.grounded ? 0.45 : 0.72;
+          const leaderPull = !leader.grounded && runner.grounded ? 0.32 : 0.68;
           const runnerPull = 1 - leaderPull;
           leader.x -= stretch * leaderPull;
           runner.x += stretch * runnerPull;
           const sharedVelocity = (leader.vx + runner.vx) * 0.5;
-          leader.vx = Math.min(leader.vx, Math.max(sharedVelocity, leader.vx * 0.82));
+          const retention = !leader.grounded ? 0.90 : 0.84;
+          leader.vx = Math.min(leader.vx, Math.max(sharedVelocity, leader.vx * retention));
           runner.vx = Math.max(runner.vx, sharedVelocity);
         }
       }

@@ -577,12 +577,17 @@ internal fun drawFinishArch(mesh: TriangleMesh, finishZ: Float, time: Float) {
     // Grand Ancient Ivy-Covered Stone Ruin Archway spanning the Finish Line
     val stone = Rgb(0.90f, 0.88f, 0.82f)
     val moss = Rgb(0.82f, 0.98f, 0.62f)
+    val goldBanner = Rgb(0.98f, 0.78f, 0.22f)
+    val crimsonBanner = Rgb(0.88f, 0.24f, 0.20f)
+    val pulse = 0.5f + 0.5f * sin(time * 4.2f)
     mesh.withMaterial(MatId.STONE, tileScale = 0.44f) {
         for (side in SIDES) {
             val px = side * 4.25f
             for (r in 0 until 6) {
                 mesh.box(Point3(px, 0.35f + r * 0.62f, finishZ), 1.05f, 0.58f, 1.05f, if (r % 2 == 0) stone else stone.shade(0.92f))
             }
+            // Twin Victory Braziers flanking the finish pillars
+            mesh.box(Point3(side * 5.25f, 0.64f, finishZ - 0.55f), 0.56f, 1.28f, 0.56f, stone.shade(0.95f))
         }
         mesh.box(Point3(0f, 3.85f, finishZ), 9.6f, 0.68f, 0.95f, stone.shade(1.05f))
     }
@@ -602,6 +607,110 @@ internal fun drawFinishArch(mesh: TriangleMesh, finishZ: Float, time: Float) {
                 5,
                 0.04f,
             )
+        }
+    }
+    // Checkered Golden Finish Strip, Swooping Pennant Banners & Floating Celebration Motes
+    mesh.withMaterial(MatId.VERTEX_COLOR) {
+        for (tile in -5..5) {
+            val tx = tile * 0.62f
+            val isGold = tile % 2 == 0
+            mesh.box(
+                Point3(tx, 0.042f, finishZ),
+                0.58f,
+                0.026f,
+                0.36f,
+                if (isGold) Rgb(1.0f, 0.88f, 0.28f) else Rgb(0.24f, 0.30f, 0.26f),
+                emissive = isGold,
+            )
+        }
+        for (side in SIDES) {
+            val bx = side * 3.15f
+            val flutter = sin(time * 3.8f + side) * 0.12f
+            mesh.box(Point3(bx, 2.75f, finishZ - 0.22f), 0.68f, 1.15f, 0.06f, crimsonBanner)
+            mesh.triangle(
+                Point3(bx - 0.34f, 2.18f, finishZ - 0.22f),
+                Point3(bx + 0.34f, 2.18f, finishZ - 0.22f),
+                Point3(bx + flutter, 1.68f, finishZ - 0.26f),
+                goldBanner,
+                emissive = true,
+            )
+            // Twin Victory Brazier Flames
+            val fx = side * 5.25f
+            val fz = finishZ - 0.55f
+            val flameH = 0.56f + 0.14f * sin(time * 7.5f + side)
+            mesh.cone(fx, 1.30f, fz, 0.28f, flameH, Rgb(1.0f, 0.52f, 0.12f), 6, emissive = true)
+            mesh.cone(fx, 1.32f, fz, 0.16f, flameH * 0.72f, Rgb(1.0f, 0.92f, 0.32f), 5, emissive = true)
+        }
+        for (mote in 0..5) {
+            val cycle = (time * 0.55f + mote * 0.17f) % 1f
+            val mx = -3.0f + mote * 1.2f + sin(time * 2.2f + mote) * 0.28f
+            val my = 0.55f + cycle * 2.85f
+            mesh.sphere(
+                Point3(mx, my, finishZ - 0.35f),
+                0.075f * (1f - cycle * 0.35f),
+                Rgb(1.0f, 0.86f + 0.12f * pulse, 0.30f),
+                5,
+                4,
+                emissive = true,
+            )
+        }
+    }
+}
+
+/**
+ * Draws a 3D roadside hazard telegraph totem and ground action-chevron strip just before an obstacle.
+ * Color-coded by action: JUMP = Amber/Gold, BRACE = Cyan/Emerald Shield, RUN = Lime Sprint.
+ */
+internal fun drawHazardWarningTelegraph(
+    mesh: TriangleMesh,
+    z: Float,
+    action: String,
+    time: Float,
+    qualityTier: RopeboundQualityTier = RopeboundQualityTier.HIGH,
+) {
+    val pulse = 0.5f + 0.5f * sin(time * 5.2f + z * 0.3f)
+    val accent = when (action) {
+        "brace" -> Rgb(0.32f, 0.94f, 0.86f + 0.12f * pulse)
+        "run" -> Rgb(0.54f, 0.98f, 0.36f)
+        else -> Rgb(1.0f, 0.78f + 0.18f * pulse, 0.22f)
+    }
+
+    // Ground Action Chevron Arrows pointing down the trail toward the hazard
+    mesh.withMaterial(MatId.VERTEX_COLOR) {
+        for (lane in -1..1) {
+            val lx = lane * 1.65f
+            val tipZ = z + 0.32f
+            val tailZ = z - 0.16f
+            mesh.triangle(
+                Point3(lx - 0.38f, 0.036f, tailZ),
+                Point3(lx + 0.38f, 0.036f, tailZ),
+                Point3(lx, 0.038f, tipZ),
+                accent,
+                emissive = true,
+            )
+        }
+    }
+
+    // Flanking Carved Timber & Stone Warning Totems on Left & Right Trail Shoulders
+    val sidesToDraw = if (qualityTier == RopeboundQualityTier.LOW) floatArrayOf(1f) else SIDES
+    for (side in sidesToDraw) {
+        val tx = side * 4.05f
+        mesh.withMaterial(MatId.STONE, tileScale = 0.5f) {
+            mesh.box(Point3(tx, 0.20f, z), 0.44f, 0.38f, 0.44f, Rgb(0.86f, 0.84f, 0.78f))
+        }
+        mesh.withMaterial(MatId.WOOD, tileScale = 0.6f) {
+            mesh.rod(Point3(tx, 0.36f, z), Point3(tx, 1.38f, z), 0.095f, Rgb(0.86f, 0.68f, 0.48f), 6, 0.075f)
+        }
+        val bobY = 1.54f + sin(time * 4.4f + side) * 0.06f
+        mesh.withMaterial(MatId.VERTEX_COLOR) {
+            when (action) {
+                "brace" -> {
+                    mesh.box(Point3(tx, bobY, z), 0.28f, 0.32f, 0.10f, accent, emissive = true)
+                }
+                else -> {
+                    mesh.cone(tx, bobY - 0.14f, z, 0.18f, 0.34f, accent, 5, emissive = true)
+                }
+            }
         }
     }
 }
