@@ -43,7 +43,7 @@ The server owns movement, collisions, rope constraints, checkpoints, and match r
 flowchart TD
     SRC[GitHub repo\nalok4041/voiceover]
     SRC -->|app/ source| BUILD[Build Android APK\n./gradlew :app:assembleDebug]
-    BUILD -->|upload asset SquadVoice-v1.2.7.apk| RELEASE[GitHub Release\nversion tag v1.2.7]
+    BUILD -->|upload asset SquadVoice-v1.2.8.apk| RELEASE[GitHub Release\nversion tag v1.2.8]
     RELEASE -->|website queries GitHub Releases| SITE[GitHub Pages\npublic download page]
 
     SRC -->|token-server/ source| RENDER[Render web service\nAPI + game routes + hosted site copy]
@@ -76,7 +76,7 @@ The repository source is the shared origin, but publishing is a separate action 
 | Authoritative game simulation/hazards | `token-server/ropebound/game-core.js` | Render service |
 | Public download page | `index.html` | GitHub Pages |
 | Render-hosted copy of download page | `token-server/public/index.html` | Render service root `/` |
-| APK download | GitHub Release asset named `SquadVoice-v1.2.7.apk` (current release candidate) | Linked from the website |
+| APK download | GitHub Release asset named `SquadVoice-v1.2.8.apk` (current release candidate) | Linked from the website |
 
 ## Current project endpoints
 

@@ -1,16 +1,16 @@
 # SquadVoice Agent Handoff
 
-This file is a working handoff for an agent continuing the app, token-server, website, or release work. It records repository facts and the current local state as of 2026-10-18. Treat dashboard state as unverified unless noted below.
+This file is a working handoff for an agent continuing the app, token-server, website, or release work. It records repository facts and the current local state as of 2026-10-23. Treat dashboard state as unverified unless noted below.
 
 ## Project at a glance
 
 - GitHub repository: <https://github.com/alok4041/voiceover>
 - Default branch observed locally: `main`
-- Latest app tag: `v1.2.6` at `e315da3`. The current v1.2.7 candidate includes `553af85`, `6e93d84`, and `06c4303`; its Android version bump and site fallbacks are local changes until committed/pushed.
+- Latest published app release: `v1.2.7`. Current source is merged to `main` at `5e063a6`. The v1.2.8 candidate adds painterly Ropebound 3D visuals and adjustable graphics quality; its Android version bump, website fallbacks, release notes, and APK are being prepared locally and are not published yet.
 - Android download website: <https://alok4041.github.io/voiceover/>
 - Render token/game API URL: <https://voiceover-1.onrender.com>
 - Render health check: <https://voiceover-1.onrender.com/health>
-- Previous Android version: `1.2.6` / version code `18`. Current release candidate: `1.2.7` / version code `19`, asset name `SquadVoice-v1.2.7.apk`.
+- Previous Android version: `1.2.7` / version code `19`. Current release candidate: `1.2.8` / version code `20`, asset name `SquadVoice-v1.2.8.apk`.
 
 SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio; a Node.js/Express server issues room codes and LiveKit tokens and also serves the Ropebound game API. The website is a separate GitHub Pages deployment. The Render service also serves `token-server/public/index.html` at `/`.
 
@@ -90,13 +90,15 @@ The published v1.2.5 release includes the 3D Ropebound scene, preview runners, c
 
 The v1.2.6 update fixes held movement inputs by sharing the same Compose interaction source with the rendered buttons, changes movement arrow orientation with the selected camera, and renames the game entry to Ropebound 3D. The APK built successfully and installed over the previous app on the connected Android emulator; a physical phone was not connected for in-game verification.
 
-The v1.2.7 candidate adds online player status and lobby/player-management improvements, refines the voice-room/game presentation and input handling, and updates Ropebound's 3D scene/game core for smoother, more stable play. Release notes are in `docs/release-notes-v1.2.7.md`.
+The published v1.2.7 release adds online player status and lobby/player-management improvements, refines the voice-room/game presentation and input handling, and updates Ropebound's 3D scene/game core for smoother, more stable play. Release notes are in `docs/release-notes-v1.2.7.md`.
+
+The v1.2.8 candidate adds painterly 3D scenery and textures, refreshed runners and hazard visuals, and Auto/Low/Medium/High graphics quality options. See `docs/release-notes-v1.2.8.md`. The new app build and release are not published yet.
 
 The v1.2.4 release fixes the room-code error, message dismissal, spike readability, runner grounding, and touch controls. The v1.2.5 release adds 3D Ropebound and WebSocket gameplay. The v1.2.6 release notes are in `docs/release-notes-v1.2.6.md`.
 
 ### Transfer warning for a separate agent
 
-The v1.2.7 version/site edits and APK are a local release candidate until committed and pushed. The source commits `553af85`, `6e93d84`, and `06c4303` are on `main`. Check GitHub Releases before describing v1.2.7 as published.
+The v1.2.8 version/site edits and APK are a local release candidate until committed, pushed, and published. Ropebound painterly source is on `main` at `5e063a6`. Check GitHub Releases before describing v1.2.8 as published.
 
 Current workspace edits to the 3D scene, joystick/camera controls, renderers, and Ropebound documentation may still be uncommitted and unreleased. Check `git status` before building or publishing; this handoff describes architecture and does not mean those local edits are available in the public APK or Render service.
 
@@ -122,7 +124,7 @@ To override the server URL for one build:
 ./gradlew :app:assembleDebug -PTOKEN_SERVER_URL=https://your-server.example
 ```
 
-The debug APK output is `app/build/outputs/apk/debug/app-debug.apk`; current release upload filename is `SquadVoice-v1.2.7.apk`. The v1.2.7 build was verified as package version code `19` / version name `1.2.7`; it is 49,155,826 bytes and its SHA-256 is `574da49a70eecfa3c7ab6a160a6b2bab8db19160d09c05f9727e7541a68c7bbc`. It is debug-signed, not a Google Play release. The previous v1.2.6 APK's SHA-256 was `efd17296259873fffb121d549950b19b6f86695146b6e8e7b3b1302dfcaab892`. Never put LiveKit API secrets in Android code, Gradle properties, or the APK.
+The debug APK output is `app/build/outputs/apk/debug/app-debug.apk`; current release upload filename is `SquadVoice-v1.2.8.apk`. The v1.2.8 build was verified as package version code `20` / version name `1.2.8`; it is 49,320,337 bytes and its SHA-256 is `f3ce2861eeadbc6c288bcc1926f87143bfabbdb80c6fa335dd87bd497a2fe87c`. It is debug-signed, not a Google Play release. Never put LiveKit API secrets in Android code, Gradle properties, or the APK.
 
 **README mismatch:** `README.md` still says the default URL is `http://10.0.2.2:3000`, but the current Gradle build default and root property point to Render. The README example for a local phone build is still useful when intentionally running a local server. Update documentation only when it is in scope and keep the emulator-vs-phone distinction clear.
 
@@ -151,10 +153,10 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 - The backend is published separately as the Render web service at <https://voiceover-1.onrender.com>. Render is not where users download the APK.
 - No Google Play listing or Play Store publishing setup was found in the checked repository. The observed distribution path is direct APK download from the site/GitHub Release.
 - Where code changes go: the GitHub repository `alok4041/voiceover`, normally its `main` branch. Confirm the repository's Pages settings before relying on a push to `main` to update the website.
-- Previous app version: `v1.2.6`. Current work prepares `v1.2.7` / `SquadVoice-v1.2.7.apk`; verify the GitHub release and asset after publishing.
+- Latest published app version: `v1.2.7`. Current work prepares `v1.2.8` / `SquadVoice-v1.2.8.apk`; verify the GitHub release and asset after publishing.
 - Where backend changes go: the same GitHub repository's `token-server/` folder, then deploy the Render service. Check the Render service's connected repo/branch and root/build/start settings before deploying.
-- Both homepage copies now use a static `v1.2.7` fallback and JavaScript that requests GitHub releases at `https://api.github.com/repos/alok4041/voiceover/releases?per_page=100`. The fallback link will resolve after the matching GitHub release asset is published.
-- The v1.2.7 fallback URL is `https://github.com/alok4041/voiceover/releases/download/v1.2.7/SquadVoice-v1.2.7.apk`.
+- Both homepage copies have a static `v1.2.8` fallback and JavaScript that requests GitHub releases at `https://api.github.com/repos/alok4041/voiceover/releases?per_page=100`. The fallback link will resolve after the matching GitHub release asset is published; until then the dynamic release list continues to show the latest published APK.
+- The v1.2.8 fallback URL is `https://github.com/alok4041/voiceover/releases/download/v1.2.8/SquadVoice-v1.2.8.apk`.
 - No `.github` workflow was found during the repository check. Do not assume APK builds, releases, or Render deploys are automated; inspect GitHub and Render settings before promising automation.
 - To publish a new APK, first review the source changes, rebuild, and install/test the APK. Then follow the repository owner's GitHub Release process, using the expected tag and APK asset name if that convention is retained. If the GitHub API is unavailable or there is no release yet, the static fallback can remain stale, so consider updating both HTML fallbacks as part of a website release change.
 - `app-debug.apk` is a debug build. Before replacing an APK already installed on a user's phone, ensure the new APK has a compatible signing certificate; Android refuses in-place updates signed by a different key. Keep the signing key private and backed up. Do not claim a Play Store-ready release unless a proper release signing/distribution setup is added and verified.
@@ -167,9 +169,9 @@ For local development, put a phone-reachable LAN URL in the Gradle property (exa
 3. Confirm the Render service is healthy and its environment variables are configured without exposing secret values.
 4. Install the rebuilt APK on a physical phone and confirm the BuildConfig URL is the Render HTTPS endpoint.
 5. Check whether the pushed token-server changes are live on Render; confirm `/health` and game API behavior.
-6. Build and verify the v1.2.7 APK, publish its GitHub release and asset, then verify both download-page copies and the in-app update check.
+6. Build and verify the v1.2.8 APK, publish its GitHub release and asset only after approval, then verify both download-page copies and the in-app update check.
 7. Report exactly what was changed, tested, deployed, and left pending.
 
 ## Copy-paste prompt for the next agent
 
-> Continue the SquadVoice v1.2.7 release in `/Users/alok1404/voiceover`. Read `docs/release-notes-v1.2.7.md` and inspect `git status --short`. The candidate includes improved lobby/player management and Ropebound 3D input, scene, and stability work. Voice remains on LiveKit. Render API: `https://voiceover-1.onrender.com`. Keep LiveKit secrets private.
+> Continue the SquadVoice v1.2.8 release in `/Users/alok1404/voiceover`. Read `docs/release-notes-v1.2.8.md` and inspect `git status --short`. The candidate adds painterly Ropebound 3D visuals and adjustable graphics quality. Voice remains on LiveKit. Render API: `https://voiceover-1.onrender.com`. Keep LiveKit secrets private. Do not publish until the user approves.
