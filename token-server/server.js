@@ -110,7 +110,34 @@ a.secondary{background:#1b302c;color:#edf7f5}
 </body></html>`);
 });
 
-app.get('/health', (_request, response) => response.json({ ok: true }));
+app.get('/health', (_request, response) => response.json({ ok: true, version: '1.2.9' }));
+
+app.get('/test-livekit', async (_request, response) => {
+  const diagnostics = {
+    version: '1.2.9',
+    livekitUrl: process.env.LIVEKIT_URL,
+    hasApiKey: Boolean(process.env.LIVEKIT_API_KEY),
+    hasApiSecret: Boolean(process.env.LIVEKIT_API_SECRET),
+    tokenGeneration: null,
+    livekitApi: null,
+  };
+
+  try {
+    const testToken = await createParticipantToken('TEST99', 'DiagnosticUser');
+    diagnostics.tokenGeneration = { success: true, tokenLength: testToken?.length };
+  } catch (err) {
+    diagnostics.tokenGeneration = { success: false, error: err.message || String(err) };
+  }
+
+  try {
+    const found = await livekit.room.listRooms(['TEST99']);
+    diagnostics.livekitApi = { success: true, response: found };
+  } catch (err) {
+    diagnostics.livekitApi = { success: false, error: err.message || String(err) };
+  }
+
+  return response.json(diagnostics);
+});
 
 // Mount the game feature independently. Its simulation is separate from the
 // LiveKit voice-room session and keeps running while the foreground voice
@@ -120,6 +147,7 @@ mountRopeboundRoutes(app, ropebound, requireRoomParticipant, server);
 app.post('/rooms/create', async (request, response) => {
   const roomName = readText(request.body?.roomName, 40);
   const userName = readText(request.body?.userName, 24);
+  console.log(`[rooms/create] Request from user: "${userName}", room: "${roomName}"`);
   if (!roomName || !userName) {
     return response.status(400).json({ error: 'Enter a room name and your name.' });
   }
@@ -133,11 +161,13 @@ app.post('/rooms/create', async (request, response) => {
         maxParticipants: maximumParticipants,
         metadata: roomName,
       });
+      console.log(`[rooms/create] Explicit createRoom succeeded for ${code}`);
     } catch (livekitError) {
-      console.warn('LiveKit explicit createRoom skipped (auto-create on join will handle room):', livekitError.message || livekitError);
+      console.warn(`[rooms/create] Explicit LiveKit createRoom skipped for ${code}:`, livekitError.message || livekitError);
     }
     rooms.set(code, { roomName, createdAt: Date.now() });
     const participantToken = await createParticipantToken(code, userName);
+    console.log(`[rooms/create] Successfully created room ${code}`);
     return response.status(201).json({
       code,
       roomName,
@@ -145,8 +175,8 @@ app.post('/rooms/create', async (request, response) => {
       participantToken,
     });
   } catch (error) {
-    console.error('Could not create room:', error);
-    return response.status(503).json({ error: 'Could not create a room right now. Try again.' });
+    console.error('[rooms/create] Error creating room:', error);
+    return response.status(503).json({ error: error.message || 'Could not create a room right now. Try again.' });
   }
 });
 
