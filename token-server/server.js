@@ -1,6 +1,6 @@
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
-import { AccessToken, LiveKitAPI } from 'livekit-server-sdk';
+import { AccessToken, LiveKitAPI, RoomServiceClient } from 'livekit-server-sdk';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { GameError, RopeboundGameCore } from './ropebound/game-core.js';
@@ -21,14 +21,17 @@ const maximumParticipants = 10;
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const rooms = new Map();
 const ropebound = new RopeboundGameCore();
-const livekitApiHost = process.env.LIVEKIT_URL
+
+const livekitUrl = (process.env.LIVEKIT_URL || '').trim();
+const livekitApiKey = (process.env.LIVEKIT_API_KEY || '').trim();
+const livekitApiSecret = (process.env.LIVEKIT_API_SECRET || '').trim();
+const livekitApiHost = livekitUrl
   .replace(/^wss:/i, 'https:')
   .replace(/^ws:/i, 'http:');
-const livekit = new LiveKitAPI({
-  host: livekitApiHost,
-  apiKey: process.env.LIVEKIT_API_KEY,
-  secret: process.env.LIVEKIT_API_SECRET,
-});
+
+// LiveKit room management client with trimmed credentials
+const roomService = new RoomServiceClient(livekitApiHost, livekitApiKey, livekitApiSecret);
+const livekit = new LiveKitAPI(livekitApiHost, livekitApiKey, livekitApiSecret);
 
 // Looks up a room in memory first. If the server slept or restarted (memory is
 // empty), ask LiveKit whether the room is still live and restore it.
@@ -38,7 +41,7 @@ async function findRoom(code) {
   rooms.delete(code);
 
   try {
-    const found = await livekit.room.listRooms([code]);
+    const found = await roomService.listRooms([code]);
     const liveRoom = Array.isArray(found) ? found[0] : found?.rooms?.[0];
     if (!liveRoom) return null;
 
@@ -130,7 +133,7 @@ app.get('/test-livekit', async (_request, response) => {
   }
 
   try {
-    const found = await livekit.room.listRooms(['TEST99']);
+    const found = await roomService.listRooms(['TEST99']);
     diagnostics.livekitApi = { success: true, response: found };
   } catch (err) {
     diagnostics.livekitApi = { success: false, error: err.message || String(err) };
@@ -155,7 +158,7 @@ app.post('/rooms/create', async (request, response) => {
   try {
     const code = createRoomCode();
     try {
-      await livekit.room.createRoom({
+      await roomService.createRoom({
         name: code,
         emptyTimeout: 300,
         maxParticipants: maximumParticipants,
@@ -171,7 +174,7 @@ app.post('/rooms/create', async (request, response) => {
     return response.status(201).json({
       code,
       roomName,
-      serverUrl: process.env.LIVEKIT_URL,
+      serverUrl: livekitUrl,
       participantToken,
     });
   } catch (error) {
@@ -273,7 +276,7 @@ function verifyParticipantToken(token) {
   if (header.alg !== 'HS256' || !payload.sub || !Number.isFinite(payload.exp) || payload.exp <= Math.floor(Date.now() / 1000)) {
     throw new AuthenticationError('The voice-room token is expired or invalid.', 'expired_token');
   }
-  const expected = createHmac('sha256', process.env.LIVEKIT_API_SECRET)
+  const expected = createHmac('sha256', livekitApiSecret)
     .update(`${parts[0]}.${parts[1]}`)
     .digest();
   const actual = Buffer.from(parts[2], 'base64url');
@@ -284,7 +287,7 @@ function verifyParticipantToken(token) {
 }
 
 async function createParticipantToken(roomCode, userName) {
-  const token = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
+  const token = new AccessToken(livekitApiKey, livekitApiSecret, {
     identity: randomUUID(),
     name: userName,
     ttl: '1h',
