@@ -37,13 +37,18 @@ async function findRoom(code) {
   if (cached && Date.now() - cached.createdAt <= roomCodeLifetimeMs) return cached;
   rooms.delete(code);
 
-  const found = await livekit.room.listRooms([code]);
-  const liveRoom = Array.isArray(found) ? found[0] : found?.rooms?.[0];
-  if (!liveRoom) return null;
+  try {
+    const found = await livekit.room.listRooms([code]);
+    const liveRoom = Array.isArray(found) ? found[0] : found?.rooms?.[0];
+    if (!liveRoom) return null;
 
-  const restored = { roomName: liveRoom.metadata || code, createdAt: Date.now() };
-  rooms.set(code, restored);
-  return restored;
+    const restored = { roomName: liveRoom.metadata || code, createdAt: Date.now() };
+    rooms.set(code, restored);
+    return restored;
+  } catch (error) {
+    console.warn('Could not query LiveKit rooms:', error.message || error);
+    return null;
+  }
 }
 
 const roomCodeCleanup = setInterval(() => {
@@ -121,12 +126,16 @@ app.post('/rooms/create', async (request, response) => {
 
   try {
     const code = createRoomCode();
-    await livekit.room.createRoom({
-      name: code,
-      emptyTimeout: 300,
-      maxParticipants: maximumParticipants,
-      metadata: roomName,
-    });
+    try {
+      await livekit.room.createRoom({
+        name: code,
+        emptyTimeout: 300,
+        maxParticipants: maximumParticipants,
+        metadata: roomName,
+      });
+    } catch (livekitError) {
+      console.warn('LiveKit explicit createRoom skipped (auto-create on join will handle room):', livekitError.message || livekitError);
+    }
     rooms.set(code, { roomName, createdAt: Date.now() });
     const participantToken = await createParticipantToken(code, userName);
     return response.status(201).json({
