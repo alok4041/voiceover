@@ -6,11 +6,11 @@ This file is a working handoff for an agent continuing the app, token-server, we
 
 - GitHub repository: <https://github.com/alok4041/voiceover>
 - Default branch observed locally: `main`
-- Latest published app release: `v1.2.7`. Current source is merged to `main` at `5e063a6`. The v1.2.8 candidate adds painterly Ropebound 3D visuals and adjustable graphics quality; its Android version bump, website fallbacks, release notes, and APK are being prepared locally and are not published yet.
+- Latest published app release: `v1.2.7`. Current source is merged to `main` at `5e063a6`. The v1.2.9 candidate adds LiveKit Cloud production updates, painterly Ropebound 3D visuals, and adjustable graphics quality; its Android version bump, website fallbacks, release notes, and APK are being prepared locally and are not published yet.
 - Android download website: <https://alok4041.github.io/voiceover/>
 - Render token/game API URL: <https://voiceover-1.onrender.com>
 - Render health check: <https://voiceover-1.onrender.com/health>
-- Previous Android version: `1.2.7` / version code `19`. Current release candidate: `1.2.8` / version code `20`, asset name `SquadVoice-v1.2.8.apk`.
+- Previous Android version: `1.2.8` / version code `20`. Current release candidate: `1.2.9` / version code `21`, asset name `SquadVoice-v1.2.9.apk`.
 
 SquadVoice is an Android Kotlin/Jetpack Compose app. LiveKit carries voice audio; a Node.js/Express server issues room codes and LiveKit tokens and also serves the Ropebound game API. The website is a separate GitHub Pages deployment. The Render service also serves `token-server/public/index.html` at `/`.
 
